@@ -6,6 +6,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <mutex>
 #include <random>
 #include <string>
@@ -602,7 +603,7 @@ struct Archetype {
     float toneBias;       // additive muscle tone (0-100 space)
     float intensityBias;  // additive SKEE intensity multiplier
 };
-static const std::vector<Archetype> kArchetypes{
+static std::vector<Archetype> kArchetypes{
     //  name             wt     frB    frS   brs  butt  hips  thgh belly waist arms  shld  tone   int
     // weight column flattened in the 2026-06-17 variety pass: top 4 (Balanced/Rect/Slim/Pear) went
     // from ~50% to ~38% of NPCs, rarer types raised, so fewer NPCs land on the same archetype.
@@ -738,6 +739,50 @@ float ButtFullness(std::uint32_t seed, float archButtDelta) {
 }
 
 }  // namespace
+
+// Optional runtime override of the archetype table (weights + shape deltas) from a CSV, so users
+// can retune body shapes WITHOUT recompiling. Columns match the Archetype struct; blank cells keep
+// the built-in value, unknown names are ignored, a missing file leaves the defaults untouched.
+void WeightManager::LoadArchetypeConfig() {
+    std::ifstream f(R"(.\Data\SKSE\Plugins\OBodyNGWeight_Archetypes.csv)");
+    if (!f) { SKSE::log::info("Archetypes: no CSV override; using built-in defaults"); return; }
+    const auto trim = [](std::string v) {
+        std::size_t b = 0, e = v.size();
+        while (b < e && std::isspace(static_cast<unsigned char>(v[b]))) ++b;
+        while (e > b && std::isspace(static_cast<unsigned char>(v[e - 1]))) --e;
+        return v.substr(b, e - b);
+    };
+    const auto lower = [](std::string v) {
+        std::transform(v.begin(), v.end(), v.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return v;
+    };
+    std::string line;
+    int applied = 0, ln = 0;
+    while (std::getline(f, line)) {
+        ++ln;
+        const std::string t = trim(line);
+        if (t.empty() || t[0] == '#' || t[0] == ';') continue;
+        std::vector<std::string> col;
+        for (std::size_t i = 0, s0 = 0; i <= t.size(); ++i)
+            if (i == t.size() || t[i] == ',') { col.push_back(trim(t.substr(s0, i - s0))); s0 = i + 1; }
+        if (col.empty() || lower(col[0]) == "name") continue;  // header/blank line
+        auto it = std::find_if(kArchetypes.begin(), kArchetypes.end(),
+                               [&](const Archetype& a) { return lower(a.name) == lower(col[0]); });
+        if (it == kArchetypes.end()) { SKSE::log::warn("Archetypes: line {}: unknown archetype '{}'", ln, col[0]); continue; }
+        float* const field[13] = { &it->weight, &it->frameBias, &it->frameScale, &it->dBreasts,
+            &it->dButt, &it->dHips, &it->dThighs, &it->dBelly, &it->dWaist, &it->dArms,
+            &it->dShoulders, &it->toneBias, &it->intensityBias };
+        for (std::size_t c = 1; c < col.size() && c <= 13; ++c) {
+            if (col[c].empty()) continue;  // blank cell = keep built-in
+            try { *field[c - 1] = std::stof(col[c]); }
+            catch (...) { SKSE::log::warn("Archetypes: line {} col {}: bad number '{}'", ln, c, col[c]); }
+        }
+        if (it->weight < 0.0f) it->weight = 0.0f;
+        ++applied;
+    }
+    SKSE::log::info("Archetypes: applied {} override row(s) from CSV", applied);
+}
 
 // Classify the actor's race and publish it (+ the live coherence strength) to the thread-local the
 // archetype rollers read. Called at the top of every entry point that leads to an archetype roll, so

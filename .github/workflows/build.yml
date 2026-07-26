@@ -11,6 +11,8 @@ on:
       tag: { required: true, type: string }
   release:
     types: [published]
+  pull_request:
+    branches: [master]
   workflow_dispatch:
 
 permissions:
@@ -20,7 +22,7 @@ jobs:
   build:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Deps (spdlog, rapidcsv, CommonLibSSE-NG) are pulled via CMake FetchContent
       # from the CMakeLists — no vcpkg. VS2022 + CMake are preinstalled on the runner.
@@ -59,7 +61,7 @@ jobs:
           "archive=$archive" >> $env:GITHUB_OUTPUT
 
       - name: Upload build artifact (always)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.pack.outputs.archive }}
           path: ${{ steps.pack.outputs.archive }}

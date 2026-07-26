@@ -32,6 +32,11 @@ class WeightManager {
 public:
     static WeightManager& GetSingleton() noexcept;
 
+    // Optional per-archetype weight/shape overrides read from
+    // Data/SKSE/Plugins/OBodyNGWeight_Archetypes.csv. Call once at startup
+    // (after Config::Load). Missing/partial file falls back to built-in defaults.
+    static void LoadArchetypeConfig();
+
     // Generate the per-NPC "mock weight" (0-100) according to the configured mode. This
     // value drives the body-size morphs; it is NOT written to the actor's real weight
     // (that would cause neck seams + outfit mismatches — see main.cpp).
