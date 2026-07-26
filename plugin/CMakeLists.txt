@@ -55,6 +55,7 @@ include("${commonlibsse_SOURCE_DIR}/cmake/CommonLibSSE.cmake")
 set(SOURCES
     src/main.cpp
     src/WeightManager.cpp
+    src/ShapeCore.cpp
     src/PapyrusBindings.cpp
     src/PresetManager.cpp
     src/Config.cpp
@@ -81,3 +82,23 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         "${OUTPUT_DIR}/$<TARGET_FILE_NAME:${PROJECT_NAME}>"
     COMMENT "Installing OBodyNGWeight.dll into SKSE/Plugins"
 )
+
+# ── Unit tests (game-free ShapeCore; no RE::/SKSE) ────────────────────────────
+FetchContent_Declare(
+    doctest
+    GIT_REPOSITORY https://github.com/doctest/doctest.git
+    GIT_TAG        v2.4.11
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(doctest)
+
+enable_testing()
+add_executable(OBW_Tests
+    tests/test_shapecore.cpp
+    src/ShapeCore.cpp
+)
+target_include_directories(OBW_Tests PRIVATE src)
+target_link_libraries(OBW_Tests PRIVATE doctest::doctest)
+# Tests don't need LTO; keep them fast to build.
+set_target_properties(OBW_Tests PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
+add_test(NAME shapecore COMMAND OBW_Tests)

@@ -1,6 +1,7 @@
 #include "WeightManager.hpp"
 #include "FastRandom.hpp"
 #include "Config.hpp"
+#include "ShapeCore.hpp"       // RaceClass + ClassifyRaceStr (now unit-tested)
 #include "MorphInterface.hpp"   // OBW::g_morph (SKEE body-morph interface) for the clothed refit
 #include <algorithm>
 #include <cctype>
@@ -488,32 +489,10 @@ float CenterDraw(std::mt19937& rng) {
 // HIMBO body, so the "exotic" of a Khajiit or Argonian comes from a lean, straight distribution, not
 // a special slider. Set per-call via a thread-local (each entry point classifies its actor first),
 // so the deep pure archetype rollers stay signature-free and thread-safe across concurrent actors.
-enum class RaceClass : std::uint8_t {
-    kNeutral = 0, kNord, kImperial, kBreton, kRedguard, kOrc,
-    kAltmer, kBosmer, kDunmer, kKhajiit, kArgonian, kElder
-};
 
 thread_local RaceClass tls_race         = RaceClass::kNeutral;
 thread_local float     tls_raceStrength = 0.0f;   // 0 = coherence off → no modulation (identical to legacy)
 
-// Classify a lowercased race id/name string. Order matters: specific (highelf) before generic (elf).
-RaceClass ClassifyRaceStr(const std::string& s) {
-    if (s.empty()) return RaceClass::kNeutral;
-    auto has = [&](const char* k) { return s.find(k) != std::string::npos; };
-    if (has("elder"))                                    return RaceClass::kElder;      // aged (before race/elf)
-    if (has("khajiit") || has("rhajiit"))                return RaceClass::kKhajiit;
-    if (has("argonian") || has("saxhleel"))              return RaceClass::kArgonian;
-    if (has("highelf") || has("high elf") || has("altmer")) return RaceClass::kAltmer;
-    if (has("woodelf") || has("wood elf") || has("bosmer")) return RaceClass::kBosmer;
-    if (has("darkelf") || has("dark elf") || has("dunmer")) return RaceClass::kDunmer;
-    if (has("orsimer") || has("orc"))                    return RaceClass::kOrc;
-    if (has("redguard"))                                 return RaceClass::kRedguard;
-    if (has("breton"))                                   return RaceClass::kBreton;
-    if (has("imperial"))                                 return RaceClass::kImperial;
-    if (has("nord"))                                     return RaceClass::kNord;
-    if (has("elf") || has("mer"))                        return RaceClass::kDunmer;     // generic modded mer → lean elf
-    return RaceClass::kNeutral;
-}
 
 // Robust runtime classify (no po3 dependency): EditorID (best — catches vampire variants + mod races by
 // substring, if editorIDs are retained) → race FULL name (always retained at runtime: "Nord","High Elf"…)
