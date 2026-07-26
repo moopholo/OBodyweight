@@ -6,7 +6,6 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
-#include <fstream>
 #include <mutex>
 #include <random>
 #include <string>
@@ -740,48 +739,39 @@ float ButtFullness(std::uint32_t seed, float archButtDelta) {
 
 }  // namespace
 
-// Optional runtime override of the archetype table (weights + shape deltas) from a CSV, so users
-// can retune body shapes WITHOUT recompiling. Columns match the Archetype struct; blank cells keep
-// the built-in value, unknown names are ignored, a missing file leaves the defaults untouched.
+// Optional runtime override of the archetype table (weights + shape deltas), read from an INI so
+// users can retune body SHAPES without recompiling. One [section] per archetype; each key is
+// optional (omit = keep the built-in). A missing file / missing key leaves the defaults intact.
 void WeightManager::LoadArchetypeConfig() {
-    std::ifstream f(R"(.\Data\SKSE\Plugins\OBodyNGWeight_Archetypes.csv)");
-    if (!f) { SKSE::log::info("Archetypes: no CSV override; using built-in defaults"); return; }
-    const auto trim = [](std::string v) {
-        std::size_t b = 0, e = v.size();
-        while (b < e && std::isspace(static_cast<unsigned char>(v[b]))) ++b;
-        while (e > b && std::isspace(static_cast<unsigned char>(v[e - 1]))) --e;
-        return v.substr(b, e - b);
-    };
-    const auto lower = [](std::string v) {
-        std::transform(v.begin(), v.end(), v.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        return v;
-    };
-    std::string line;
-    int applied = 0, ln = 0;
-    while (std::getline(f, line)) {
-        ++ln;
-        const std::string t = trim(line);
-        if (t.empty() || t[0] == '#' || t[0] == ';') continue;
-        std::vector<std::string> col;
-        for (std::size_t i = 0, s0 = 0; i <= t.size(); ++i)
-            if (i == t.size() || t[i] == ',') { col.push_back(trim(t.substr(s0, i - s0))); s0 = i + 1; }
-        if (col.empty() || lower(col[0]) == "name") continue;  // header/blank line
-        auto it = std::find_if(kArchetypes.begin(), kArchetypes.end(),
-                               [&](const Archetype& a) { return lower(a.name) == lower(col[0]); });
-        if (it == kArchetypes.end()) { SKSE::log::warn("Archetypes: line {}: unknown archetype '{}'", ln, col[0]); continue; }
-        float* const field[13] = { &it->weight, &it->frameBias, &it->frameScale, &it->dBreasts,
-            &it->dButt, &it->dHips, &it->dThighs, &it->dBelly, &it->dWaist, &it->dArms,
-            &it->dShoulders, &it->toneBias, &it->intensityBias };
-        for (std::size_t c = 1; c < col.size() && c <= 13; ++c) {
-            if (col[c].empty()) continue;  // blank cell = keep built-in
-            try { *field[c - 1] = std::stof(col[c]); }
-            catch (...) { SKSE::log::warn("Archetypes: line {} col {}: bad number '{}'", ln, c, col[c]); }
-        }
-        if (it->weight < 0.0f) it->weight = 0.0f;
-        ++applied;
+    constexpr const char* kIni = R"(.\Data\SKSE\Plugins\OBodyNGWeight_Archetypes.ini)";
+    if (GetFileAttributesA(kIni) == INVALID_FILE_ATTRIBUTES) {
+        SKSE::log::info("Archetypes: no override INI; using built-in defaults");
+        return;
     }
-    SKSE::log::info("Archetypes: applied {} override row(s) from CSV", applied);
+    // Read one float for [section] Key, or return `cur` if the key is absent/blank.
+    const auto rd = [&](const char* section, const char* key, float cur) -> float {
+        char buf[64] = {};
+        GetPrivateProfileStringA(section, key, "", buf, static_cast<DWORD>(sizeof(buf)), kIni);
+        if (buf[0] == '\0') return cur;
+        try { return std::stof(buf); }
+        catch (...) { SKSE::log::warn("Archetypes: [{}] {}: bad number '{}'", section, key, buf); return cur; }
+    };
+    for (auto& a : kArchetypes) {
+        a.weight        = std::max(0.0f, rd(a.name, "Weight",     a.weight));
+        a.frameBias     = rd(a.name, "FrameBias",  a.frameBias);
+        a.frameScale    = rd(a.name, "FrameScale", a.frameScale);
+        a.dBreasts      = rd(a.name, "Breasts",    a.dBreasts);
+        a.dButt         = rd(a.name, "Butt",       a.dButt);
+        a.dHips         = rd(a.name, "Hips",       a.dHips);
+        a.dThighs       = rd(a.name, "Thighs",     a.dThighs);
+        a.dBelly        = rd(a.name, "Belly",      a.dBelly);
+        a.dWaist        = rd(a.name, "Waist",      a.dWaist);
+        a.dArms         = rd(a.name, "Arms",       a.dArms);
+        a.dShoulders    = rd(a.name, "Shoulders",  a.dShoulders);
+        a.toneBias      = rd(a.name, "Tone",       a.toneBias);
+        a.intensityBias = rd(a.name, "Intensity",  a.intensityBias);
+    }
+    SKSE::log::info("Archetypes: applied overrides from OBodyNGWeight_Archetypes.ini");
 }
 
 // Classify the actor's race and publish it (+ the live coherence strength) to the thread-local the
