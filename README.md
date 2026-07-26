@@ -111,6 +111,13 @@ Keys per section: `Weight, FrameBias, FrameScale, Breasts, Butt, Hips, Thighs, B
 Arms, Shoulders, Tone, Intensity`. The shipped file is pre-tuned toward a curvy / slim-thick
 family; a missing file simply falls back to the built-in defaults.
 
+**Men** have the same knobs in `OBodyNGWeight_MaleArchetypes.ini` — one `[Section]` per HIMBO
+archetype (Average, Lean, Fit, Soldier, Dadbod, Heavyset, Stocky, Bodybuilder…) with keys
+`Weight, Muscle, Fat, Shoulders, Waist, Belly, Arms, Tone, Intensity`. `Muscle`/`Fat` shift the
+build; `Intensity` scales overall SKEE magnitude (the lever for the big muscular tail). The
+shipped file reproduces the built-in defaults, so it changes nothing until you edit it. *Which*
+race rolls which build is separate — see `[<race>.male]` in the race rules below.
+
 ## Race & group body rules — `OBodyNGWeight_Races.ini`
 
 Each race biases which body archetypes its NPCs roll (Orcs trend broad/strong,
