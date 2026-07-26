@@ -111,6 +111,29 @@ Keys per section: `Weight, FrameBias, FrameScale, Breasts, Butt, Hips, Thighs, B
 Arms, Shoulders, Tone, Intensity`. The shipped file is pre-tuned toward a curvy / slim-thick
 family; a missing file simply falls back to the built-in defaults.
 
+## Race & group body rules — `OBodyNGWeight_Races.ini`
+
+Each race biases which body archetypes its NPCs roll (Orcs trend broad/strong,
+Bosmer petite, Altmer slender…). You can retune that bias, add **absolute
+exclusions**, and define **custom groups** — all without rebuilding — by editing
+`Data/SKSE/Plugins/OBodyNGWeight_Races.ini`.
+
+- **`Mult.<Archetype>`** — per-group weight multiplier (`>1` more common, `<1` rarer).
+  These take effect only while **Race coherence** is `> 0` in the MCM.
+- **`Exclude`** — archetypes a group **never** rolls. This is **absolute**: it holds
+  even with coherence off, so it's a true safety rail. Prefix a name with `-` to
+  *remove* a built-in default exclusion.
+- **`FrameBias`** — additive body-volume bias for the group.
+- **Custom groups** — a `[Group:Name]` section with a `Match = substr, …` list maps
+  modded races (by editorID/name substring) to your own rules.
+
+Sections are `[group]` for women and `[group.male]` for men, so you can tune the
+sexes independently. **Built-in default:** aged NPCs (**elders**, any race) ship with
+absolute exclusions on the overtly "sexy" / peak-athletic archetypes — they get
+soft, natural, mature shapes instead, regardless of the coherence slider. The
+shipped file is a documented template with every override commented out (so a fresh
+install runs on the built-in defaults); uncomment to retune.
+
 ## Compatibility
 
 - Female slider names target CBBE 3BA; male names target HIMBO. Other bodies use different
