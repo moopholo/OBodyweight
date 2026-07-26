@@ -10,7 +10,7 @@ name: Release
 # same outcome, reliably. build.yml still fires on manually-published releases.
 on:
   push:
-    branches: [master]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
