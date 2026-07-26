@@ -137,6 +137,8 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
 
     // Read INI defaults (FOMOD-installed preset) before WeightManager is constructed.
     OBW::Config::Load();
+    // Optional per-archetype weight/shape overrides (CSV) — after Config, before bodies are built.
+    OBW::WeightManager::LoadArchetypeConfig();
     // Plugin exclusion list (NPCs from these .esp/.esl/.esm are left untouched).
     OBW::Config::LoadExclusions();
 

@@ -83,6 +83,34 @@ synthesized lean↔full range) — presets you assign **manually** through OBody
 left untouched so OBody's own on-demand features keep working. **Procedural Oriented** blends the
 generated shape toward that preset.
 
+## Tuning body shapes — `OBodyNGWeight_Archetypes.ini`
+
+Every generated body is one of 24 **archetypes** (Slim Thick, Pear, Hourglass, BBW, Athletic…),
+each a set of shape offsets plus a **weight** (how often it's rolled). You can retune both — the
+*weights* (which shapes dominate the world) and the *shapes themselves* — by editing
+`Data/SKSE/Plugins/OBodyNGWeight_Archetypes.ini`, **no rebuild required**. Edit, save, restart.
+
+- One `[Section]` per archetype. Every key is optional — **omit it to keep the built-in value**;
+  delete a whole section to leave that archetype untouched.
+- Values are **0–100 slider space**. `Waist` > 0 = **more cinch** (narrower), < 0 = wider.
+  `Weight` is the relative roll frequency (`0` = never).
+
+```ini
+[Slim Thick]
+Weight=12.0     ; rolled often
+Butt=26         ; +26 in slider space
+Hips=18
+Thighs=20
+Waist=35        ; strong cinch
+Breasts=6
+Tone=25         ; some muscle definition
+Intensity=0.02
+```
+
+Keys per section: `Weight, FrameBias, FrameScale, Breasts, Butt, Hips, Thighs, Belly, Waist,
+Arms, Shoulders, Tone, Intensity`. The shipped file is pre-tuned toward a curvy / slim-thick
+family; a missing file simply falls back to the built-in defaults.
+
 ## Compatibility
 
 - Female slider names target CBBE 3BA; male names target HIMBO. Other bodies use different
