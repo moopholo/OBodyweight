@@ -36,6 +36,7 @@ public:
     // Data/SKSE/Plugins/OBodyNGWeight_Archetypes.csv. Call once at startup
     // (after Config::Load). Missing/partial file falls back to built-in defaults.
     static void LoadArchetypeConfig();
+    static void LoadMaleArchetypeConfig();
     static void LoadRaceConfig();
 
     // Generate the per-NPC "mock weight" (0-100) according to the configured mode. This
