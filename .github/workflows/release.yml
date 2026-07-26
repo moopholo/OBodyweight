@@ -1,0 +1,51 @@
+name: Release
+
+# On merge/push to master: cut a release (tag = project version + run number),
+# then build the DLL and attach the MO2 archive to it.
+#
+# Note on the two stages: a release created with the built-in GITHUB_TOKEN does
+# NOT trigger other workflows (GitHub's anti-recursion rule), so we can't rely on
+# build.yml's `release: published` trigger for the automated path. Instead this
+# workflow CALLS build.yml directly (workflow_call) after creating the release —
+# same outcome, reliably. build.yml still fires on manually-published releases.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.ver.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute version tag
+        id: ver
+        run: |
+          V=$(grep -oP 'project\([^)]*VERSION\s+\K[0-9]+(\.[0-9]+)*' plugin/CMakeLists.txt)
+          echo "tag=v${V}.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" \
+            --title "${{ steps.ver.outputs.tag }}" \
+            --target "${{ github.sha }}" \
+            --notes "Automated release from master @ ${{ github.sha }}.
+
+          MO2-installable archive attached below: OBodyNGWeight.dll (reweighted
+          kArchetypes) + esp + tuned SKSE configs. Install OVER the base
+          OBodyWeight mod — the (unchanged) compiled Papyrus scripts come from it."
+
+  build:
+    needs: create-release
+    uses: ./.github/workflows/build.yml
+    with:
+      tag: ${{ needs.create-release.outputs.tag }}
+    secrets: inherit

@@ -1,0 +1,73 @@
+name: Build
+
+# Builds the SKSE DLL and packages an MO2-installable 7z, then attaches it to a
+# release. Runs three ways:
+#   - called by release.yml (workflow_call) right after it creates a release
+#   - on a manually-published release (release: published)
+#   - on demand (workflow_dispatch) for a smoke-test build (no upload)
+on:
+  workflow_call:
+    inputs:
+      tag: { required: true, type: string }
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      # Deps (spdlog, rapidcsv, CommonLibSSE-NG) are pulled via CMake FetchContent
+      # from the CMakeLists — no vcpkg. VS2022 + CMake are preinstalled on the runner.
+      - name: Configure
+        working-directory: plugin
+        run: cmake --preset release
+
+      - name: Build
+        working-directory: plugin
+        run: cmake --build build --config Release
+        # POST_BUILD copies OBodyNGWeight.dll into <repo>/SKSE/Plugins/
+
+      - name: Resolve tag
+        id: tag
+        shell: pwsh
+        run: |
+          $tag = '${{ inputs.tag }}'
+          if (-not $tag) { $tag = '${{ github.event.release.tag_name }}' }
+          if (-not $tag) { $tag = "dev-$(git rev-parse --short HEAD)" }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      # MO2-installable layout: esp + SKSE/ (built DLL + tuned INI + CBPC configs).
+      # Compiled Papyrus (.pex) is NOT included — it needs the Creation Kit and is
+      # unchanged from the base mod, so install this OVER the base OBodyWeight.
+      - name: Package MO2 archive
+        id: pack
+        shell: pwsh
+        run: |
+          $tag = '${{ steps.tag.outputs.tag }}'
+          $stage = "OBodyNGWeight-$tag"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item OBodyNGWeight.esp $stage
+          Copy-Item -Recurse SKSE $stage
+          $archive = "$stage.7z"
+          7z a -mx=9 $archive ".\$stage\*"
+          "archive=$archive" >> $env:GITHUB_OUTPUT
+
+      - name: Upload build artifact (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pack.outputs.archive }}
+          path: ${{ steps.pack.outputs.archive }}
+
+      # Attach to the release (skipped for a plain workflow_dispatch smoke test,
+      # which has no tag/release to attach to).
+      - name: Attach to release
+        if: ${{ inputs.tag != '' || github.event_name == 'release' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ steps.tag.outputs.tag }}" "${{ steps.pack.outputs.archive }}" --clobber
