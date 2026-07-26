@@ -608,32 +608,32 @@ static const std::vector<Archetype> kArchetypes{
     // from ~50% to ~38% of NPCs, rarer types raised, so fewer NPCs land on the same archetype.
     // shld (2026-06-19): shoulder breadth = the silhouette axis. Narrow on Pear/Petite (true pear),
     // broad on Amazon/Stocky/Athletic/Rectangle/TopHeavy (V-taper / strong / boyish). Big "type" expander.
-    { "Balanced",      10.0f,   0.0f, 1.00f,   0,    0,    0,    0,    0,    5,    0,    0,    0,  0.00f },
-    { "Rectangle",      9.0f,   0.0f, 0.95f,  -6,   -8,   -8,   -4,    0,  -12,    0,   14,    8, -0.03f },  // straight/boyish, broad-ish, no waist cinch
-    { "Slim",           8.0f, -12.0f, 0.90f,  -8,   -6,   -6,   -6,    0,    0,   -4,   -4,    5, -0.05f },
-    { "Pear",           9.0f,   2.0f, 1.00f,  -8,   22,   26,   20,    0,   12,    0,  -16,    0,  0.00f },  // narrow shoulders + wide hips = true pear
-    { "TopHeavy",       7.0f,   2.0f, 1.00f,  26,   -8,  -10,   -6,    0,    8,    0,   14,    0,  0.00f },  // broad upper + big bust = inverted triangle
-    { "Hourglass",      7.0f,   4.0f, 1.00f,  20,   18,   20,    8,    0,   40,    0,    2,    0,  0.04f },
+    { "Balanced",      3.0f,   0.0f, 1.00f,   0,    0,    0,    0,    0,    5,    0,    0,    0,  0.00f },
+    { "Rectangle",      1.0f,   0.0f, 0.95f,  -6,   -8,   -8,   -4,    0,  -12,    0,   14,    8, -0.03f },  // straight/boyish, broad-ish, no waist cinch
+    { "Slim",           1.0f, -12.0f, 0.90f,  -8,   -6,   -6,   -6,    0,    0,   -4,   -4,    5, -0.05f },
+    { "Pear",           11.0f,   2.0f, 1.00f,  -8,   22,   26,   20,    0,   12,    0,  -16,    0,  0.00f },  // narrow shoulders + wide hips = true pear
+    { "TopHeavy",       1.0f,   2.0f, 1.00f,  26,   -8,  -10,   -6,    0,    8,    0,   14,    0,  0.00f },  // broad upper + big bust = inverted triangle
+    { "Hourglass",      8.0f,   4.0f, 1.00f,  20,   18,   20,    8,    0,   40,    0,    2,    0,  0.04f },
     { "Voluptuous",     7.0f,  14.0f, 1.00f,  18,   18,   12,   10,    0,   18,    4,    4,    0,  0.12f },
-    { "AppleSoft",      6.0f,   8.0f, 1.00f,   8,    4,    6,    8,   35,  -10,   14,    6,    0,  0.05f },
-    { "BBW",            6.0f,  18.0f, 1.00f,  24,   24,   20,   22,   30,    0,   20,   10,    0,  0.18f },  // big soft curvy (between Voluptuous & Obese)
-    { "Athletic",       6.0f,  -4.0f, 0.95f,   0,    8,    0,    6,   -5,   14,   -2,   18,   55,  0.00f },  // broad shoulders, V-taper
-    { "AthleticCurvy",  5.0f,   2.0f, 1.00f,  12,   18,    6,   10,   -6,   16,    0,   10,   45,  0.00f },  // toned WITH curves (fitness)
-    { "Obese",          4.0f,  24.0f, 1.00f,  20,   20,   18,   28,   70,  -15,   30,   12,    0,  0.22f },
-    { "Stocky",         4.0f,   6.0f, 0.85f,  -4,   16,   20,   20,    6,   -8,   10,   22,   25,  0.05f },  // short sturdy, broad + wide lower (warrior races)
-    { "Petite",         3.0f, -28.0f, 0.70f, -10,   -8,   -8,   -8,    0,    0,   -6,  -16,    0, -0.08f },  // narrow shoulders too (small frame)
-    { "Amazon",         3.0f,  22.0f, 1.00f,  10,   16,   14,   20,    0,   10,    0,   24,   65,  0.10f },  // broad/strong
+    { "AppleSoft",      3.0f,   8.0f, 1.00f,   8,    4,    6,    8,   35,  -10,   14,    6,    0,  0.05f },
+    { "BBW",            5.0f,  18.0f, 1.00f,  24,   24,   20,   22,   30,    0,   20,   10,    0,  0.18f },  // big soft curvy (between Voluptuous & Obese)
+    { "Athletic",       2.0f,  -4.0f, 0.95f,   0,    8,    0,    6,   -5,   14,   -2,   18,   55,  0.00f },  // broad shoulders, V-taper
+    { "AthleticCurvy",  7.0f,   2.0f, 1.00f,  12,   18,    6,   10,   -6,   16,    0,   10,   45,  0.00f },  // toned WITH curves (fitness)
+    { "Obese",          1.0f,  24.0f, 1.00f,  20,   20,   18,   28,   70,  -15,   30,   12,    0,  0.22f },
+    { "Stocky",         1.0f,   6.0f, 0.85f,  -4,   16,   20,   20,    6,   -8,   10,   22,   25,  0.05f },  // short sturdy, broad + wide lower (warrior races)
+    { "Petite",         1.0f, -28.0f, 0.70f, -10,   -8,   -8,   -8,    0,    0,   -6,  -16,    0, -0.08f },  // narrow shoulders too (small frame)
+    { "Amazon",         1.0f,  22.0f, 1.00f,  10,   16,   14,   20,    0,   10,    0,   24,   65,  0.10f },  // broad/strong
     // NEW (2026-06-19) — silhouettes the shoulder axis + shape dims now make distinct. Complete the
     // classic body-shape taxonomy (we already had Pear/Rectangle/Hourglass/TopHeavy/Apple/Round).
-    { "Inverted Triangle", 4.0f, 0.0f, 0.95f, 10,  -14,  -16,  -12,   -4,   10,    2,   26,   18, -0.02f },  // broad shoulders, narrow lower (counterpart to Pear)
-    { "Diamond",         4.0f,   8.0f, 1.00f,   4,   -6,   -6,   -8,   30,  -22,    6,  -14,    0,  0.06f },  // narrow shoulders, midsection-heavy, slim limbs
-    { "Spoon",           4.0f,   4.0f, 1.00f,  -4,   20,   30,   22,    6,   18,    2,  -14,    0,  0.04f },  // pronounced pear: wide hip shelf + cinched waist
-    { "MILF",            4.0f,  10.0f, 1.00f,  18,   14,   18,   12,   14,   20,    6,    2,    0,  0.08f },  // mature curvy-soft: full (slightly heavy) bust, soft low belly, kept waist
-    { "Slim Thick",      4.0f,   2.0f, 1.00f,   6,   26,   18,   20,   -8,   35,    0,    2,   25,  0.02f },  // tiny cinched waist + thick toned lower
-    { "Bottom Hourglass",4.0f,   4.0f, 1.00f,  10,   24,   26,   14,    0,   38,    0,   -2,    0,  0.04f },  // hourglass weighted LOW
-    { "Top Hourglass",   4.0f,   4.0f, 1.00f,  28,    8,    6,    2,    0,   38,    2,    8,    0,  0.04f },  // hourglass weighted UP (cinched waist, unlike TopHeavy)
-    { "Lollipop",        3.0f,  -8.0f, 0.92f,  34,   -8,   -8,   -8,   -4,   18,   -4,    0,    5,  0.02f },  // slim frame + large bust
-    { "Strongwoman",     3.0f,  18.0f, 1.00f,   8,   16,   14,   18,   20,   -6,   18,   24,   60,  0.12f },  // heavy + broad + muscular (bruiser/powerlifter, soft over muscle)
+    { "Inverted Triangle", 1.0f, 0.0f, 0.95f, 10,  -14,  -16,  -12,   -4,   10,    2,   26,   18, -0.02f },  // broad shoulders, narrow lower (counterpart to Pear)
+    { "Diamond",         1.0f,   8.0f, 1.00f,   4,   -6,   -6,   -8,   30,  -22,    6,  -14,    0,  0.06f },  // narrow shoulders, midsection-heavy, slim limbs
+    { "Spoon",           9.0f,   4.0f, 1.00f,  -4,   20,   30,   22,    6,   18,    2,  -14,    0,  0.04f },  // pronounced pear: wide hip shelf + cinched waist
+    { "MILF",            6.0f,  10.0f, 1.00f,  18,   14,   18,   12,   14,   20,    6,    2,    0,  0.08f },  // mature curvy-soft: full (slightly heavy) bust, soft low belly, kept waist
+    { "Slim Thick",      12.0f,   2.0f, 1.00f,   6,   26,   18,   20,   -8,   35,    0,    2,   25,  0.02f },  // tiny cinched waist + thick toned lower
+    { "Bottom Hourglass",9.0f,   4.0f, 1.00f,  10,   24,   26,   14,    0,   38,    0,   -2,    0,  0.04f },  // hourglass weighted LOW
+    { "Top Hourglass",   3.0f,   4.0f, 1.00f,  28,    8,    6,    2,    0,   38,    2,    8,    0,  0.04f },  // hourglass weighted UP (cinched waist, unlike TopHeavy)
+    { "Lollipop",        1.0f,  -8.0f, 0.92f,  34,   -8,   -8,   -8,   -4,   18,   -4,    0,    5,  0.02f },  // slim frame + large bust
+    { "Strongwoman",     1.0f,  18.0f, 1.00f,   8,   16,   14,   18,   20,   -6,   18,   24,   60,  0.12f },  // heavy + broad + muscular (bruiser/powerlifter, soft over muscle)
 };
 const Archetype& GetArchetype(std::uint32_t seedBase) {
     std::mt19937 rng{ seedBase ^ 0x0A5C1759u };
