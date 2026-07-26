@@ -7,6 +7,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <mutex>
 #include <random>
 #include <string>
@@ -490,82 +491,41 @@ float CenterDraw(std::mt19937& rng) {
 // a special slider. Set per-call via a thread-local (each entry point classifies its actor first),
 // so the deep pure archetype rollers stay signature-free and thread-safe across concurrent actors.
 
-thread_local RaceClass tls_race         = RaceClass::kNeutral;
-thread_local float     tls_raceStrength = 0.0f;   // 0 = coherence off → no modulation (identical to legacy)
+thread_local std::string tls_group        = "neutral";
+thread_local float       tls_raceStrength = 0.0f;   // 0 = coherence off -> no modulation (identical to legacy)
 
+// The per-race / per-group body rules (archetype weight multipliers, hard-excludes, frame bias) now
+// live in ShapeCore as testable, INI-overridable data. Two default rule sets (the same race biasing
+// OBW always shipped, plus new default hard-excludes so aged NPCs never roll "sexy" bodies), overlaid
+// at load by LoadRaceConfig(). Female + male are separate because a race biases the two body systems
+// differently.
+RaceRules g_femaleRules = OBW::DefaultRaceRules(false);
+RaceRules g_maleRules   = OBW::DefaultRaceRules(true);
 
-// Robust runtime classify (no po3 dependency): EditorID (best — catches vampire variants + mod races by
-// substring, if editorIDs are retained) → race FULL name (always retained at runtime: "Nord","High Elf"…)
-// → Neutral (unknown/modded human → legacy uniform distribution, no regression).
-RaceClass ClassifyRace(RE::Actor* a_actor) {
-    if (!a_actor) return RaceClass::kNeutral;
+// Best lowercased race string for grouping: EditorID (catches vampire/mod variants + custom groups by
+// substring, when retained) -> race FULL name (always present at runtime: "Nord","High Elf") -> empty.
+std::string RaceStringLower(RE::Actor* a_actor) {
+    if (!a_actor) return {};
     auto* race = a_actor->GetRace();
-    if (!race) return RaceClass::kNeutral;
+    if (!race) return {};
     const char* eid = race->GetFormEditorID();
-    if (eid && *eid) { RaceClass rc = ClassifyRaceStr(ToLower(eid)); if (rc != RaceClass::kNeutral) return rc; }
+    if (eid && *eid) return ToLower(eid);
     const char* nm = race->GetName();
-    if (nm && *nm)   { RaceClass rc = ClassifyRaceStr(ToLower(nm));  if (rc != RaceClass::kNeutral) return rc; }
-    return RaceClass::kNeutral;
+    if (nm && *nm) return ToLower(nm);
+    return {};
 }
 
-// Sparse per-race archetype weight multipliers (default 1.0 for any archetype not listed). Keyed by the
-// archetype NAME so the tables survive a reorder of kArchetypes/kMaleArchetypes. Calibrated to keep the
-// full range possible (no zeroes) — an Orc CAN still be petite, just rarely.
-using RaceMultMap = std::unordered_map<std::string_view, float>;
-static const std::unordered_map<RaceClass, RaceMultMap> kRaceArchF{
-    { RaceClass::kNord,     { {"Stocky",2.0f},{"Athletic",1.5f},{"Rectangle",1.3f},{"Amazon",1.3f},{"Strongwoman",1.2f},{"Balanced",1.1f},{"Petite",0.5f},{"Lollipop",0.7f},{"Diamond",0.7f} } },
-    { RaceClass::kImperial, { {"Balanced",1.2f},{"Hourglass",1.1f},{"MILF",1.1f},{"Amazon",0.7f},{"Strongwoman",0.6f} } },
-    { RaceClass::kBreton,   { {"Petite",1.7f},{"Slim",1.4f},{"Balanced",1.2f},{"Lollipop",1.2f},{"Amazon",0.4f},{"Strongwoman",0.4f},{"Stocky",0.6f},{"BBW",0.7f} } },
-    { RaceClass::kRedguard, { {"Athletic",2.2f},{"AthleticCurvy",2.0f},{"Slim Thick",1.6f},{"Amazon",1.3f},{"Strongwoman",1.2f},{"Obese",0.4f},{"BBW",0.6f},{"Petite",0.6f} } },
-    { RaceClass::kOrc,      { {"Amazon",3.0f},{"Strongwoman",3.0f},{"Stocky",2.2f},{"BBW",1.4f},{"Athletic",1.3f},{"Rectangle",1.2f},{"Petite",0.15f},{"Slim",0.4f},{"Lollipop",0.3f},{"Top Hourglass",0.5f},{"Diamond",0.6f} } },
-    { RaceClass::kAltmer,   { {"Slim",2.2f},{"Top Hourglass",1.3f},{"Lollipop",1.3f},{"Rectangle",1.2f},{"Inverted Triangle",1.2f},{"Petite",0.5f},{"Stocky",0.2f},{"Obese",0.25f},{"BBW",0.4f},{"Strongwoman",0.3f},{"Amazon",0.4f} } },
-    { RaceClass::kBosmer,   { {"Petite",3.0f},{"Slim",2.2f},{"Rectangle",1.3f},{"Athletic",1.2f},{"BBW",0.25f},{"Obese",0.2f},{"Amazon",0.2f},{"Strongwoman",0.3f},{"Voluptuous",0.5f},{"MILF",0.6f} } },
-    { RaceClass::kDunmer,   { {"Slim",1.8f},{"Rectangle",1.4f},{"Athletic",1.3f},{"Slim Thick",1.2f},{"Inverted Triangle",1.1f},{"BBW",0.4f},{"Obese",0.4f},{"Amazon",0.6f} } },
-    { RaceClass::kKhajiit,  { {"Slim",1.6f},{"Athletic",1.5f},{"Petite",1.3f},{"Slim Thick",1.3f},{"AthleticCurvy",1.2f},{"Rectangle",1.1f},{"Obese",0.3f},{"BBW",0.4f} } },
-    { RaceClass::kArgonian, { {"Rectangle",1.6f},{"Slim",1.4f},{"Athletic",1.3f},{"Inverted Triangle",1.2f},{"TopHeavy",0.4f},{"Lollipop",0.2f},{"Voluptuous",0.5f},{"BBW",0.5f},{"Obese",0.5f} } },
-    { RaceClass::kElder,    { {"AppleSoft",2.2f},{"Diamond",1.4f},{"MILF",1.3f},{"Voluptuous",1.3f},{"Rectangle",1.2f},{"BBW",1.1f},{"Athletic",0.1f},{"AthleticCurvy",0.1f},{"Slim Thick",0.1f},{"Amazon",0.1f},{"Strongwoman",0.1f},{"Lollipop",0.4f},{"Hourglass",0.6f},{"Petite",0.7f} } },
-};
-static const std::unordered_map<RaceClass, RaceMultMap> kRaceArchM{
-    { RaceClass::kNord,     { {"Soldier",2.0f},{"Stocky",1.8f},{"Powerlifter",1.5f},{"Bodybuilder",1.2f},{"Fit",1.2f},{"Twink",0.4f},{"Lanky",0.7f} } },
-    { RaceClass::kImperial, { {"Average",1.3f},{"Soldier",1.2f},{"Fit",1.1f},{"Bodybuilder",0.7f},{"Powerlifter",0.7f} } },
-    { RaceClass::kBreton,   { {"Lean",1.5f},{"Lanky",1.3f},{"Average",1.2f},{"Twink",1.2f},{"Swimmer",1.1f},{"Powerlifter",0.4f},{"Bodybuilder",0.5f},{"Heavyset",0.7f} } },
-    { RaceClass::kRedguard, { {"Fit",2.0f},{"Soldier",1.8f},{"Swimmer",1.5f},{"Bodybuilder",1.2f},{"Heavyset",0.5f},{"Dadbod",0.7f},{"Twink",0.5f} } },
-    { RaceClass::kOrc,      { {"Powerlifter",3.0f},{"Stocky",2.5f},{"Bodybuilder",2.2f},{"Soldier",1.6f},{"Twink",0.15f},{"Lanky",0.4f},{"Lean",0.5f} } },
-    { RaceClass::kAltmer,   { {"Lean",1.8f},{"Lanky",1.6f},{"Swimmer",1.4f},{"Twink",1.2f},{"Fit",1.1f},{"Powerlifter",0.3f},{"Heavyset",0.4f},{"Stocky",0.4f},{"Bodybuilder",0.6f} } },
-    { RaceClass::kBosmer,   { {"Lanky",2.2f},{"Twink",2.0f},{"Lean",1.6f},{"Powerlifter",0.2f},{"Bodybuilder",0.3f},{"Heavyset",0.3f},{"Stocky",0.4f} } },
-    { RaceClass::kDunmer,   { {"Lean",1.7f},{"Fit",1.4f},{"Swimmer",1.3f},{"Lanky",1.3f},{"Heavyset",0.4f},{"Powerlifter",0.6f} } },
-    { RaceClass::kKhajiit,  { {"Fit",1.6f},{"Lean",1.5f},{"Swimmer",1.4f},{"Lanky",1.2f},{"Heavyset",0.3f},{"Powerlifter",0.5f},{"Dadbod",0.6f} } },
-    { RaceClass::kArgonian, { {"Lean",1.5f},{"Fit",1.4f},{"Swimmer",1.3f},{"Lanky",1.3f},{"Heavyset",0.5f},{"Powerlifter",0.6f} } },
-    { RaceClass::kElder,    { {"Dadbod",1.8f},{"Heavyset",1.6f},{"Average",1.2f},{"Lanky",1.2f},{"Bodybuilder",0.1f},{"Powerlifter",0.2f},{"Fit",0.3f},{"Swimmer",0.4f},{"Twink",0.5f} } },
-};
-
-// Effective archetype weight multiplier for the current thread-local race, lerped by coherence strength
-// (strength 0 → 1.0 = no change; strength 1 → full raw multiplier). male picks the HIMBO table.
+// Effective archetype weight multiplier for the current thread-local group, via the shared ShapeCore
+// rule engine. `male` selects the HIMBO rule set. Hard excludes return 0 absolutely (ignoring the
+// coherence strength); everything else lerps by strength, so coherence off == legacy uniform.
 float RaceArchMult(const char* name, bool male) {
-    const float strength = tls_raceStrength;
-    if (strength <= 0.0f) return 1.0f;
-    const auto& tables = male ? kRaceArchM : kRaceArchF;
-    auto rit = tables.find(tls_race);
-    if (rit == tables.end()) return 1.0f;                       // neutral/unknown race → uniform
-    auto mit = rit->second.find(std::string_view(name));
-    const float raw = (mit != rit->second.end()) ? mit->second : 1.0f;
-    return 1.0f + (raw - 1.0f) * strength;
+    return OBW::GroupArchMult(tls_group, name, male ? g_maleRules : g_femaleRules, tls_raceStrength);
 }
 
-// Small additive frame-size (volume) bias per race, lerped by strength: reinforces size WITHIN an
-// archetype (a Balanced Orc still reads bigger than a Balanced Bosmer). Frame here is body VOLUME,
-// not height — Altmer are slender, so negative despite being tall.
+// Additive frame-size (volume) bias for the current group, lerped by strength (only the female frame
+// path uses it; the frame bias is body-shared and identical across the default sex tables).
 float RaceFrameBias() {
-    const float strength = tls_raceStrength;
-    if (strength <= 0.0f) return 0.0f;
-    static const std::unordered_map<RaceClass, float> kBias{
-        { RaceClass::kNord, 4.0f }, { RaceClass::kBreton, -5.0f }, { RaceClass::kRedguard, 2.0f },
-        { RaceClass::kOrc, 8.0f }, { RaceClass::kAltmer, -3.0f }, { RaceClass::kBosmer, -8.0f },
-        { RaceClass::kDunmer, -4.0f }, { RaceClass::kKhajiit, -4.0f }, { RaceClass::kArgonian, -3.0f },
-        { RaceClass::kElder, 3.0f },
-    };
-    auto it = kBias.find(tls_race);
-    return (it != kBias.end() ? it->second : 0.0f) * strength;
+    return OBW::GroupFrameBias(tls_group, g_femaleRules, tls_raceStrength);
 }
 
 // ── Body archetypes ──────────────────────────────────────────────────────────
@@ -754,12 +714,43 @@ void WeightManager::LoadArchetypeConfig() {
     SKSE::log::info("Archetypes: applied overrides from OBodyNGWeight_Archetypes.ini");
 }
 
+// Optional runtime override of the race/group body rules (per-group archetype multipliers, hard
+// excludes, frame bias, and custom groups that map modded races to bespoke rules), read from an INI so
+// users can retune WITHOUT recompiling. Section names + keys map straight to ShapeCore::ApplyRulesSection
+// (which is unit-tested); this function only enumerates the raw sections/keys via the Win32 INI API and
+// feeds them in. A missing file / unknown section simply leaves the built-in defaults intact.
+void WeightManager::LoadRaceConfig() {
+    constexpr const char* kIni = R"(.\Data\SKSE\Plugins\OBodyNGWeight_Races.ini)";
+    if (GetFileAttributesA(kIni) == INVALID_FILE_ATTRIBUTES) {
+        SKSE::log::info("Races: no override INI; using built-in race/group rules");
+        return;
+    }
+    // Section names come back as a double-null-terminated list ("s1\0s2\0\0").
+    std::vector<char> names(16384);
+    if (GetPrivateProfileSectionNamesA(names.data(), static_cast<DWORD>(names.size()), kIni) == 0) return;
+    int applied = 0;
+    for (const char* s = names.data(); *s; s += std::strlen(s) + 1) {
+        const std::string section = s;
+        std::vector<char> buf(32768);   // this section's "key=value\0...\0\0"
+        GetPrivateProfileSectionA(section.c_str(), buf.data(), static_cast<DWORD>(buf.size()), kIni);
+        std::vector<std::pair<std::string, std::string>> kv;
+        for (const char* p = buf.data(); *p; p += std::strlen(p) + 1) {
+            const std::string line = p;
+            const auto eq = line.find('=');
+            if (eq == std::string::npos) continue;
+            kv.emplace_back(line.substr(0, eq), line.substr(eq + 1));
+        }
+        if (OBW::ApplyRulesSection(g_femaleRules, g_maleRules, section, kv)) ++applied;
+    }
+    SKSE::log::info("Races: applied {} override section(s) from OBodyNGWeight_Races.ini", applied);
+}
+
 // Classify the actor's race and publish it (+ the live coherence strength) to the thread-local the
 // archetype rollers read. Called at the top of every entry point that leads to an archetype roll, so
 // the deep pure rollers stay parameter-free. Thread-local → correct even when the loading thread and
 // the Papyrus VM process different actors concurrently.
 void WeightManager::SetRaceCtx(RE::Actor* a_actor) const noexcept {
-    tls_race         = ClassifyRace(a_actor);
+    tls_group        = OBW::ResolveGroup(RaceStringLower(a_actor), g_femaleRules);
     tls_raceStrength = std::clamp(_raceCoherence, 0.0f, 1.0f);
 }
 
