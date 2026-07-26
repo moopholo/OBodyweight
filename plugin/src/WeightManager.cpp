@@ -1135,7 +1135,9 @@ struct MaleArchetype {
 // SoftCapMale 1.12 = big guys couldn't exceed 1.0). We lift ONLY the striking tail (Fit/Soldier/Stocky/
 // Bodybuilder/Powerlifter get more muscle + intensity headroom); the ordinary archetypes (Average/Lean/
 // Dadbod/Heavyset/Lanky/Twink) are untouched, so the MEDIAN man stays ordinary ("striking by exception").
-static const std::vector<MaleArchetype> kMaleArchetypes{
+// Non-const so LoadMaleArchetypeConfig() can overlay OBodyNGWeight_MaleArchetypes.ini at load
+// (the male counterpart to kArchetypes + LoadArchetypeConfig).
+static std::vector<MaleArchetype> kMaleArchetypes{
     //  name           wt   musc  fat  shld  waist belly arms tone  int
     { "Average",      12.f,  0.f,  0.f,   0,   0,    0,   0,   0,  0.00f },
     { "Lean",         10.f, -6.f, -8.f,   4,  -4,   -6,   0,   8, -0.02f },
@@ -1283,6 +1285,38 @@ float MaleSlider(std::string_view key, float M, float F) {
 }
 
 }  // namespace
+
+// Optional runtime override of the MALE archetype table (weights + build/shape deltas), read from an
+// INI so users can retune men's body types without recompiling — the counterpart to
+// LoadArchetypeConfig()/OBodyNGWeight_Archetypes.ini. One [section] per male archetype; each key is
+// optional (omit = keep the built-in). A missing file / missing key leaves the defaults intact.
+void WeightManager::LoadMaleArchetypeConfig() {
+    constexpr const char* kIni = R"(.\Data\SKSE\Plugins\OBodyNGWeight_MaleArchetypes.ini)";
+    if (GetFileAttributesA(kIni) == INVALID_FILE_ATTRIBUTES) {
+        SKSE::log::info("Male archetypes: no override INI; using built-in defaults");
+        return;
+    }
+    const auto rd = [&](const char* section, const char* key, float cur) -> float {
+        char buf[64] = {};
+        GetPrivateProfileStringA(section, key, "", buf, static_cast<DWORD>(sizeof(buf)), kIni);
+        if (buf[0] == '\0') return cur;
+        try { return std::stof(buf); }
+        catch (...) { SKSE::log::warn("Male archetypes: [{}] {}: bad number '{}'", section, key, buf); return cur; }
+    };
+    for (auto& a : kMaleArchetypes) {
+        a.weight        = rd(a.name, "Weight",    a.weight);
+        if (a.weight < 0.0f) a.weight = 0.0f;  // no std::max (windows.h max macro)
+        a.muscle        = rd(a.name, "Muscle",    a.muscle);
+        a.fat           = rd(a.name, "Fat",       a.fat);
+        a.dShoulders    = rd(a.name, "Shoulders", a.dShoulders);
+        a.dWaist        = rd(a.name, "Waist",     a.dWaist);
+        a.dBelly        = rd(a.name, "Belly",     a.dBelly);
+        a.dArms         = rd(a.name, "Arms",      a.dArms);
+        a.toneBias      = rd(a.name, "Tone",      a.toneBias);
+        a.intensityBias = rd(a.name, "Intensity", a.intensityBias);
+    }
+    SKSE::log::info("Male archetypes: applied overrides from OBodyNGWeight_MaleArchetypes.ini");
+}
 
 float WeightManager::GetMaleMorphValue(RE::Actor* a_actor, std::string_view morphName) {
     if (!a_actor) return 0.0f;
