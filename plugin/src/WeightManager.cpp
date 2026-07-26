@@ -757,7 +757,8 @@ void WeightManager::LoadArchetypeConfig() {
         catch (...) { SKSE::log::warn("Archetypes: [{}] {}: bad number '{}'", section, key, buf); return cur; }
     };
     for (auto& a : kArchetypes) {
-        a.weight        = std::max(0.0f, rd(a.name, "Weight",     a.weight));
+        a.weight        = rd(a.name, "Weight",     a.weight);
+        if (a.weight < 0.0f) a.weight = 0.0f;  // no std::max (windows.h max macro)
         a.frameBias     = rd(a.name, "FrameBias",  a.frameBias);
         a.frameScale    = rd(a.name, "FrameScale", a.frameScale);
         a.dBreasts      = rd(a.name, "Breasts",    a.dBreasts);
