@@ -38,6 +38,37 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(rapidcsv)
 set(RAPIDCSV_INCLUDE_DIRS "${rapidcsv_SOURCE_DIR}/src" CACHE PATH "" FORCE)
 
+# ── DirectXTK (SimpleMath only) ────────────────────────────────────────────────
+# CommonLibSSE-NG v15 does find_package(directxtk CONFIG REQUIRED) and links Microsoft::DirectXTK,
+# but only ever includes <SimpleMath.h> (RE/S/State.h). A vcpkg/user-preset install is used when one
+# is visible; otherwise (e.g. the fork's GitHub CI, which has no vcpkg step) fetch DirectXTK's sources
+# and build JUST SimpleMath.cpp - the full library would compile HLSL shaders and XAudio for nothing.
+find_package(directxtk CONFIG QUIET)
+if(NOT directxtk_FOUND)
+    FetchContent_Declare(
+        DirectXTK
+        GIT_REPOSITORY https://github.com/microsoft/DirectXTK.git
+        GIT_TAG        oct2025
+        GIT_SHALLOW    TRUE
+        SOURCE_SUBDIR  _no_cmake_  # populate only; don't add_subdirectory the full library
+    )
+    FetchContent_MakeAvailable(DirectXTK)
+    add_library(OBW_DirectXTK_SimpleMath STATIC "${directxtk_SOURCE_DIR}/Src/SimpleMath.cpp")
+    target_include_directories(OBW_DirectXTK_SimpleMath
+        PUBLIC  "${directxtk_SOURCE_DIR}/Inc"
+        PRIVATE "${directxtk_SOURCE_DIR}/Src")
+    target_compile_features(OBW_DirectXTK_SimpleMath PUBLIC cxx_std_17)
+    add_library(Microsoft::DirectXTK ALIAS OBW_DirectXTK_SimpleMath)
+
+    set(_dxtk_cmake_dir "${CMAKE_BINARY_DIR}/directxtk-cmake")
+    file(MAKE_DIRECTORY "${_dxtk_cmake_dir}")
+    file(WRITE "${_dxtk_cmake_dir}/directxtkConfig.cmake"
+        "set(directxtk_FOUND TRUE)\n"
+        "# Microsoft::DirectXTK is defined by the parent project (SimpleMath-only build).\n"
+    )
+    set(directxtk_DIR "${_dxtk_cmake_dir}" CACHE PATH "" FORCE)
+endif()
+
 # ── CommonLibSSE-NG ────────────────────────────────────────────────────────────
 FetchContent_Declare(
     CommonLibSSE
