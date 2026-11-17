@@ -24,8 +24,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Deps (spdlog, rapidcsv, CommonLibSSE-NG) are pulled via CMake FetchContent
-      # from the CMakeLists — no vcpkg. VS2022 + CMake are preinstalled on the runner.
+      # Deps (spdlog, rapidcsv, CommonLibSSE-NG v15, doctest) are pulled via CMake
+      # FetchContent from the CMakeLists — no vcpkg. VS2022 + CMake are preinstalled.
+      # OBW_COPY_TO_MOD (default ON) copies the DLL into <repo>/SKSE/Plugins for packaging.
       - name: Configure
         working-directory: plugin
         run: cmake --preset release
@@ -35,7 +36,7 @@ jobs:
         run: cmake --build build --config Release
         # POST_BUILD copies OBodyNGWeight.dll into <repo>/SKSE/Plugins/
 
-      - name: Run unit tests (ShapeCore)
+      - name: Run unit tests (ShapeCore + BodyNet)
         working-directory: plugin
         run: ctest --test-dir build -C Release --output-on-failure
 
@@ -48,9 +49,10 @@ jobs:
           if (-not $tag) { $tag = "dev-$(git rev-parse --short HEAD)" }
           "tag=$tag" >> $env:GITHUB_OUTPUT
 
-      # MO2-installable layout: esp + SKSE/ (built DLL + tuned INI + CBPC configs).
-      # Compiled Papyrus (.pex) is NOT included — it needs the Creation Kit and is
-      # unchanged from the base mod, so install this OVER the base OBodyWeight.
+      # MO2-installable layout: esp + SKSE/ (built DLL + tuned INIs + CBPC configs +
+      # BodyNet models). Compiled Papyrus (.pex) is NOT included — it needs the
+      # Creation Kit and the fork does not change the scripts, so install this OVER
+      # the base OBodyNG Weight of the SAME upstream version (scripts must match).
       - name: Package MO2 archive
         id: pack
         shell: pwsh

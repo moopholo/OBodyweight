@@ -1,7 +1,8 @@
 name: Release
 
-# On merge/push to master: cut a release (tag = project version + run number),
-# then build the DLL and attach the MO2 archive to it.
+# On merge/push to main: cut a release (tag = upstream project version + a fork
+# build suffix that restarts at 1 for every new upstream version: v1.6.2.1,
+# v1.6.2.2, ...), then build the DLL and attach the MO2 archive to it.
 #
 # Note on the two stages: a release created with the built-in GITHUB_TOKEN does
 # NOT trigger other workflows (GitHub's anti-recursion rule), so we can't rely on
@@ -26,9 +27,18 @@ jobs:
 
       - name: Compute version tag
         id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           V=$(grep -oP 'project\([^)]*VERSION\s+\K[0-9]+(\.[0-9]+)*' plugin/CMakeLists.txt)
-          echo "tag=v${V}.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          # Fork suffix = highest existing v${V}.N release + 1 (first release of a new
+          # upstream version is v${V}.1). The v1.5.2.x series used the run number,
+          # which happened to match while the workflow was new.
+          LAST=$(gh release list --limit 1000 --json tagName -q '.[].tagName' \
+                 | grep -oP "^v\Q${V}\E\.\K[0-9]+$" | sort -n | tail -1 || true)
+          N=$(( ${LAST:-0} + 1 ))
+          echo "version=${V}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${V}.${N}" >> "$GITHUB_OUTPUT"
 
       - name: Create release
         env:
@@ -37,11 +47,13 @@ jobs:
           gh release create "${{ steps.ver.outputs.tag }}" \
             --title "${{ steps.ver.outputs.tag }}" \
             --target "${{ github.sha }}" \
-            --notes "Automated release from master @ ${{ github.sha }}.
+            --notes "Automated release from main @ ${{ github.sha }}.
 
-          MO2-installable archive attached below: OBodyNGWeight.dll (reweighted
-          kArchetypes) + esp + tuned SKSE configs. Install OVER the base
-          OBodyWeight mod — the (unchanged) compiled Papyrus scripts come from it."
+          MO2-installable archive attached below: OBodyNGWeight.dll (fork build:
+          INI-driven archetypes + race/group rules) + esp + tuned SKSE configs +
+          BodyNet models. Install OVER the base OBodyNG Weight ${{ steps.ver.outputs.version }}
+          mod — the compiled Papyrus scripts (.pex) come from it and must be the
+          same upstream version."
 
   build:
     needs: create-release
