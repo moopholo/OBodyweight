@@ -2,7 +2,7 @@
 <fomod>
     <Name>OBodyNG Weight</Name>
     <Author>Fuzi</Author>
-    <Version>1.5.2</Version>
+    <Version>1.6.2</Version>
     <Description>Procedural NPC weight and body-shape randomization for OBody NG. No BodySlide preset library required.</Description>
     <Groups>
         <element>Body, Face, Hair</element>

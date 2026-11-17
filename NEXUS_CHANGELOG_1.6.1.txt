@@ -1,0 +1,10 @@
+[b]Version 1.6.1[/b]
+
+[list]
+[*]Improved stability around RaceMenu/SKEE morph initialization. OBW now verifies the BodyMorph interface, the actor and its base before applying a body. If anything required is unavailable, it skips that application safely and writes the exact reason to OBodyNGWeight.log; the plugin remains active.
+[*]Fixed the fallback used by Procedural, Procedural Oriented and OBody Sim Weight when SKEE was not ready. It could call OBody's morph-reset routine while OBody's own interface was unavailable. OBW now leaves that NPC untouched until the required interface is valid.
+[*]Queued body applications now check that the NPC is still loaded before changing morphs, preventing stale queued work from touching an unloaded actor.
+[*]Hardened reroll and preset-export messages for NPCs with no display name.
+[/list]
+
+[i]No settings need to be reset. If the log reports that the SKEE BodyMorph interface is unavailable, check that RaceMenu/SKEE is installed and compatible with your Skyrim runtime, then restart the game.[/i]

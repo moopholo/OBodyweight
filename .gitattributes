@@ -17,3 +17,4 @@
 *.esp   binary
 *.bsa   binary
 *.dds   binary
+*.obwnet binary

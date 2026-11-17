@@ -158,3 +158,41 @@ TEST_CASE("ApplyRulesSection: custom Group with Match classifies modded races (b
     // male Mult.Slim was NOT set (Mult is sex-scoped to the female section) → neutral
     CHECK(GroupArchMult("snowelf", "Slim", m, 1.0f) == doctest::Approx(1.0f));
 }
+
+// ── WeightedPick: the single archetype roller behind the procedural path AND BodyNet ─────────────────
+TEST_CASE("WeightedPick: matches the legacy cumulative scan for in-range draws") {
+    const float w[] = { 3.0f, 0.0f, 1.0f, 2.0f };
+    CHECK(OBW::WeightedPick(w, 0.0f) == 0);
+    CHECK(OBW::WeightedPick(w, 2.99f) == 0);
+    CHECK(OBW::WeightedPick(w, 3.0f) == 2);   // the zero-weight bucket is skipped
+    CHECK(OBW::WeightedPick(w, 3.5f) == 2);
+    CHECK(OBW::WeightedPick(w, 4.0f) == 3);
+    CHECK(OBW::WeightedPick(w, 5.99f) == 3);
+}
+
+TEST_CASE("WeightedPick: a float fall-through never lands on a hard-excluded (zero) entry") {
+    // Legacy code returned index 0 when r ran past the last bucket. If index 0 is excluded (weight 0)
+    // that would hand an excluded archetype to the body builder / BodyNet. Now: last positive entry.
+    const float w[] = { 0.0f, 1.0f, 2.0f, 0.0f };
+    CHECK(OBW::WeightedPick(w, 3.0f) == 2);
+    CHECK(OBW::WeightedPick(w, 3.0f + 1e-4f) == 2);
+    const float none[] = { 0.0f, 0.0f };
+    CHECK(OBW::WeightedPick(none, 0.0f) == -1);
+}
+
+TEST_CASE("WeightedPick + rules: an elder never picks an excluded archetype, at any coherence") {
+    const OBW::RaceRules rules = OBW::DefaultRaceRules(false);
+    const auto& ex = rules.groups.at("elder").exclude;
+    REQUIRE_FALSE(ex.empty());
+    const std::vector<std::string> names(ex.begin(), ex.end());
+    // A table made of every excluded archetype plus one the rules do not mention (multiplier 1.0).
+    std::vector<std::string> table = names;
+    table.push_back("__allowed__");
+    for (float strength : { 0.0f, 0.4f, 1.0f }) {
+        std::vector<float> w;
+        float total = 0.0f;
+        for (const auto& n : table) { w.push_back(OBW::GroupArchMult("elder", n, rules, strength)); total += w.back(); }
+        for (float r : { 0.0f, total * 0.5f, total, total * 1.001f })
+            CHECK(OBW::WeightedPick(w, r) == static_cast<int>(table.size()) - 1);
+    }
+}

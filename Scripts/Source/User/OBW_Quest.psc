@@ -107,26 +107,22 @@ Event OnActorGenerated(Actor akActor, string presetName)
 EndEvent
 
 Event OnUpdate()
-    ; Lazy / throttled drain: process only a few actors per tick and reschedule if
-    ; more remain. Entering a crowded cell queues many actors at once — draining them
-    ; all in one frame (each does ~14 morphs + UpdateModelWeight + armor re-equip)
-    ; caused the cell-entry freeze. Spreading the work across ticks removes the hitch.
-    ; Budget cap REMOVED (user request): drain EVERY in-range actor this tick so NPCs convert from OBody to
-    ; OBW immediately instead of ~1-2/sec. ApplyMorphs' internal Utility.Wait yields the VM between NPCs so the
-    ; work still spreads across frames; a very crowded cell may hitch (re-add a cap if so). GetNextMorphActor
-    ; returns the CLOSEST loaded actor WITHIN RADIUS (or None when the queue is empty / all remaining are too far),
-    ; so distant NPCs are still deferred to a later poll.
+    ; Safe serialized drain. OBody's event fires when ApplyBodyMorphs is submitted, not when SKEE's
+    ; asynchronous MorphFileCache work completes. C++ first waits for a quiet period per actor; this
+    ; script then submits at most one OBW rebuild per tick so crowded cells do not overlap a burst of
+    ; body and armor TRI rebuilds. GetNextMorphActor still prioritizes nearby loaded NPCs.
+    ; One actor per tick: ApplyBodyMorphs returns before all MorphFileCache PPL work necessarily
+    ; completes, so a full crowded-cell drain can overlap many body/armor TRI rebuilds in SKEE.
     int processed = 0
     Actor a = OBW_Native.GetNextMorphActor()
-    while a
+    if a
         ApplyMorphs(a)
         processed += 1
-        a = OBW_Native.GetNextMorphActor()
-    endwhile
+    endif
 
     if OBW_Native.HasMorphsPending()
         if processed > 0
-            RegisterForSingleUpdate(0.15)   ; more in range — keep draining fast
+            RegisterForSingleUpdate(1.0)    ; leave SKEE breathing room before the next rebuild
         else
             RegisterForSingleUpdate(1.0)    ; only distant actors left — poll slowly
         endif
@@ -159,6 +155,9 @@ int Function ActorSex(Actor akActor)
 EndFunction
 
 Function ApplyMorphs(Actor akActor)
+    if !OBW_Native.CanApplyMorphs(akActor)
+        return
+    endif
     ; Excluded plugins (OBodyNGWeight_Exclusions*.txt): leave those NPCs entirely to OBody/vanilla.
     if OBW_Native.IsExcluded(akActor)
         return
@@ -195,61 +194,23 @@ Function ApplyMorphs(Actor akActor)
     ; we can re-assert it after removing OBody's contribution (so OBody leaves the actor to us).
     string obKey = StorageUtil.GetStringValue(None, "obody_ng_distribution_key", "obody_processed")
 
+    ; The OBody preset assigned to this NPC (empty in pure procedural). Passed to C++ so mode 2 (Oriented)
+    ; can blend toward the FULL preset (all its sliders, not just OBW's own list), and so the preset NAME is
+    ; remembered for the MCM (OBW unassigns it below, so this is our only chance to read it).
+    string preset = OBodyNative.GetPresetAssignedToActor(akActor)
+
     ; FAST PATH (2026-07-15): the WHOLE morph suite in ONE native call. C++ computes every slider and runs
     ; all SKEE work (set + oriented blend + OBody clear/re-assert + clothed trim + ONE rebuild + neck color)
     ; in a single main-thread task. Replaces ~110 Papyrus native calls per NPC — the source of the "morphs
-    ; are slow" report. Falls through to the old slider-by-slider path only if SKEE's C++ interface is missing.
+    ; are slow" report. A native failure is logged and skips this application safely.
     OBW_Native.MarkMorphsApplied(akActor)   ; suppress OBody's re-fire when the rebuild lands
-    if OBW_Native.ApplyAllMorphs(akActor, isFemale, obKey)
+    if OBW_Native.ApplyAllMorphs(akActor, isFemale, obKey, preset)
         OBodyNative.AssignPresetToActor(akActor, "", false, true)   ; unassign preset (bookkeeping only)
         ApplyPhysicsTier(akActor)
         return
     endif
 
-    float wasProcessed = NiOverride.GetBodyMorph(akActor, obKey, "OBody")
-
-    ; Orientation strength: only body mode 2 (Procedural Oriented) blends toward the OBody preset; 0 = pure.
-    float orient = 0.0
-    if OBW_Native.GetBodyMode() == 2
-        orient = OBW_Native.GetPresetOrient()
-    endif
-
-    ; Apply our procedural morphs (key "OBW"). The OBody preset is STILL present at this point, so the
-    ; oriented blend below can read it before we remove it.
-    if isFemale
-        ApplyFemaleMorphs(akActor)
-    else
-        ApplyMaleMorphs(akActor)
-    endif
-    if orient > 0.0
-        BlendWithPreset(akActor, orient, isFemale)   ; pull each "OBW" slider toward the preset value
-    endif
-
-    ; Take OBody out of the equation for this actor: UNASSIGN its preset (nothing to re-apply) + clear its
-    ; morphs via OBody's OWN native, then re-assert the processed flag so OBody skips the actor forever. Our
-    ; "OBW" morphs (persisted by SKEE) are then the only ones -> OBW supplants OBody persistently. (Doing
-    ; this AFTER our apply/blend is what lets the oriented blend read the preset first.)
-    OBodyNative.AssignPresetToActor(akActor, "", false, true)   ; unassign preset, do not apply morphs
-    OBodyNative.ResetActorOBodyMorphs(akActor)                   ; clear OBody's "OBody" morphs (canonical native)
-    if wasProcessed == 0.0
-        wasProcessed = 1.0
-    endif
-    NiOverride.SetBodyMorph(akActor, obKey, "OBody", wasProcessed)
-
-    ; Apply the new shape the OBody way: ONE deferred SKEE ApplyBodyMorphs - it re-morphs the body AND the
-    ; worn armor and lets the engine rebuild on its next update (deferUpdate=true). Replaces the old clothed
-    ; armor re-equip (UnequipItem + Wait + EquipItem = 2 forced rebuilds, reprocessed every overlay, and the
-    ; body briefly showed mid-swap = the cell-entry stutter + the visible morph pop). Works clothed or nude.
-    ; Same one-shot guard as before so the rebuild doesn't re-fire OBody's distribution loop.
-    OBW_Native.MarkMorphsApplied(akActor)
-    OBW_Native.RefreshClothedRefit(akActor, false)   ; set dressed-vs-nude trim delta only; ApplyBody rebuilds it below (1 pass)
-    OBW_Native.ApplyBody(akActor)               ; g_morph->ApplyBodyMorphs(actor, deferUpdate=true) - one rebuild for everything
-
-    OBW_Native.NormalizeNeckColor(akActor)   ; pull head tint to body tone (neck-seam color fix; no-op if off)
-
-    ; CBPC physics preset by archetype (soft dep — no-op without CBPC). Both sexes now (male pec/belly
-    ; jiggle scales with the male archetype: firm for Fit/Bodybuilder, soft for Dadbod/Heavyset).
-    ApplyPhysicsTier(akActor)
+    ; Native failure is logged. Keep the plugin running without an unsafe OBody reset.
 EndFunction
 
 ; ── Body mode 1 (OBody Presets, weight-driven) ────────────────────────────────────────────
@@ -259,6 +220,9 @@ EndFunction
 ; OBW supplants OBody (same as the procedural path) so the result persists. Pure OBody passthrough
 ; (Weight mode = NPC Default) is filtered out by the callers before we get here.
 Function ApplyPresetWeighted(Actor akActor)
+    if !OBW_Native.CanApplyMorphs(akActor)
+        return
+    endif
     ; Per-sex master toggles: leave a disabled sex to OBody/vanilla (don't strip its preset).
     bool isFemale = ActorSex(akActor) == 1
     if isFemale && !OBW_Native.GetFemaleBodies()
@@ -287,42 +251,7 @@ Function ApplyPresetWeighted(Actor akActor)
         return
     endif
 
-    ; FALLBACK (SKEE C++ interface unavailable): the Papyrus array path (capped at 128 sliders).
-    string[] names = OBW_Native.GetPresetSliders(preset)
-    if names.Length == 0
-        OBW_Native.Log("preset-weight: preset NOT FOUND '" + preset + "'")
-        return
-    endif
-    float[] vals = OBW_Native.GetPresetMorphs(preset, akActor)
-    if vals.Length != names.Length
-        return
-    endif
-    float wasProcessed = NiOverride.GetBodyMorph(akActor, obKey, "OBody")
-    int i = 0
-    while i < names.Length
-        NiOverride.SetBodyMorph(akActor, names[i], "OBW", vals[i])
-        i += 1
-    endwhile
-    OBodyNative.AssignPresetToActor(akActor, "", false, true)
-    OBodyNative.ResetActorOBodyMorphs(akActor)
-    if wasProcessed == 0.0
-        wasProcessed = 1.0
-    endif
-    NiOverride.SetBodyMorph(akActor, obKey, "OBody", wasProcessed)
-    Form bodyArmor = akActor.GetWornForm(0x00000004)
-    if bodyArmor
-        OBW_Native.MarkMorphsApplied(akActor)
-        akActor.UnequipItem(bodyArmor, false, true)
-        Utility.Wait(0.05)
-        OBW_Native.MarkMorphsApplied(akActor)
-        akActor.EquipItem(bodyArmor, false, true)
-    else
-        OBW_Native.MarkMorphsApplied(akActor)
-        NiOverride.UpdateModelWeight(akActor)
-    endif
-    OBW_Native.RefreshClothedRefit(akActor, true)  ; OBW's own dressed-vs-nude trim
-    OBW_Native.NormalizeNeckColor(akActor)   ; neck-seam color fix (preset PSC-fallback path)
-    OBW_Native.Log("preset-weight (PSC fallback): applied '" + preset + "' to " + akActor.GetActorBase().GetName())
+    ; Native failure is logged. Keep the plugin running without an unsafe OBody reset.
 EndFunction
 
 ; Per-body physics WITHOUT replacing the user's config: CBPC's ApplyBounceInterpolation scales the

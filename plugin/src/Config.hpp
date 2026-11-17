@@ -26,12 +26,15 @@ inline float g_defaultNaturalRatio       = 0.20f;
 // Curvy-body ratio: fraction of women given the 3BA-style curvier profile (the opposite pole of Natural). For
 // BHUNP users who want some exaggerated bodies. 0.0-1.0. Off by default (CBBE users already have curvy default).
 inline float g_defaultCurvyRatio         = 0.0f;
-// Base body the setup renders: 0 = Auto-detect (from the load order), 1 = CBBE (3BA), 2 = BHUNP. Gates which
-// realism toggle the MCM surfaces (Natural for CBBE, Curvy for BHUNP).
+// Base body the setup renders: 0 = Auto-detect (from the load order), 1 = CBBE (3BA), 2 = BHUNP. Selects
+// the female BodyNet and gates which realism toggle the MCM surfaces (Natural for CBBE, Curvy for BHUNP).
 inline int   g_defaultBaseBody           = 0;
 // Clothed refit: OBW's own dressed-vs-nude body trim on the soft sliders (breasts/butt/belly), 0.0-0.5.
 // The desirable half of OBody's ORefit, owned by OBW. 0 = off (dressed body == nude body).
 inline float g_defaultClothedRefit       = 0.10f;
+// BodyNet (learned body generator): OFF by default. A new feature on a public mod earns its default
+// only after in-game validation - until then the procedural path everyone already has stays in charge.
+inline bool  g_defaultNeuralBody         = false;
 inline int   g_defaultReRollKey          = 26;  // [ / { key
 // Per-NPC exclusion hotkey (DirectInput scancode; 0 = unbound). Aim at an NPC + press to toggle its OBW
 // exclusion. Loaded from the INI at launch; MCM-bindable (SetExcludeKey rewrites the INI so it persists).

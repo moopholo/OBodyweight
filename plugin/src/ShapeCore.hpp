@@ -4,6 +4,7 @@
 // glue that turns an RE::Actor into the primitives these functions take (a seed from
 // the FormID, a RaceClass from the race). Grow this module as more pure logic moves out.
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -70,6 +71,15 @@ std::string ResolveGroup(const std::string& raceLower, const RaceRules& rules);
 // while excludes are absolute. An unknown group or archetype → strength-independent 1.0.
 float GroupArchMult(const std::string& group, const std::string& archetype,
                     const RaceRules& rules, float strength);
+
+// Weighted roulette pick: `r` is a pre-drawn value in [0, sum(weights)). Scans in order and returns the
+// first index with r < weight (subtracting as it goes) - bit-identical to OBW's legacy archetype rollers,
+// so existing NPCs keep their archetype. The difference is the fall-through: float rounding can leave r
+// just past the last bucket, and the legacy code then returned index 0 regardless of its weight. Here it
+// returns the LAST index with a positive weight instead, so a zero-weight (hard-excluded) entry can never
+// be picked - this is what keeps an excluded archetype away from BOTH the procedural path and BodyNet.
+// Returns -1 only when no weight is positive (everything excluded); callers fall back to index 0.
+int WeightedPick(std::span<const float> weights, float r);
 
 // Frame (body-volume) bias for an already-resolved group, lerped by strength (0 → 0). Unknown group → 0.
 float GroupFrameBias(const std::string& group, const RaceRules& rules, float strength);

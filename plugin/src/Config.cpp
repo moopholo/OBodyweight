@@ -42,6 +42,7 @@ void Load() {
     g_defaultCurvyRatio         = std::clamp(ReadFloat("Defaults", "CurvyRatio", 0.0f), 0.0f, 1.0f);
     g_defaultBaseBody           = std::clamp(static_cast<int>(ReadFloat("Defaults", "BaseBody", 0.0f)), 0, 2);
     g_defaultClothedRefit       = std::clamp(ReadFloat("Defaults", "ClothedRefit", 0.10f), 0.0f, 0.5f);
+    g_defaultNeuralBody         = ReadFloat("Defaults", "NeuralBody", 0.0f) >= 0.5f;
     g_defaultReRollKey          = static_cast<int>(ReadFloat("Defaults", "ReRollKey", 26.0f));
     g_excludeKey                = static_cast<int>(ReadFloat("Defaults", "ExcludeKey", 0.0f));
     g_exportKey                 = static_cast<int>(ReadFloat("Defaults", "ExportKey", 0.0f));

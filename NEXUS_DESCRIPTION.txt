@@ -36,8 +36,10 @@ As each person loads in, the mod builds a body that suits them and remembers it.
 [list]
 [*][b]Procedural[/b] - recommended. Every body is generated from scratch, so you need no presets at all and get the widest variety. Pick this if you don't curate a preset library.
 [*][b]OBody Sim Weight[/b] - keeps OBody's preset SHAPE, but re-applies each AUTO-distributed preset at that NPC's own simulated body weight. Two NPCs sharing a preset now differ in size and fullness instead of being identical clones, and presets with no weight range get an automatic lean-to-full range. Presets you assign yourself through OBody's menu are left untouched, so OBody's own features keep working. Pick this to keep your curated preset look while killing the clone army. (Want plain OBody for a specific NPC? Just assign her preset by hand through OBody's menu - OBW leaves manual choices untouched.)
-[*][b]Procedural Oriented[/b] - starts from a generated body, then blends it part-way toward that NPC's assigned OBody preset. A slider sets how far: 0% = pure generated, 100% = the preset itself, in between keeps procedural variety and per-NPC size while leaning toward your presets' style. Pick this if you want your presets' flavour without losing variety.
+[*][b]Procedural Oriented[/b] - starts from a generated body, then blends it toward that NPC's assigned OBody preset. A slider sets how far: 0% = pure generated, 100% = the preset exactly, and anything in between is a true blend of the two - procedural variety and per-NPC size leaning toward your presets' style. Pick this if you want your presets' flavour without losing variety.
 [/list]
+
+[i]In the two preset modes, OBW takes each preset over from OBody - so if you want to know which preset an NPC is wearing (OBody's own menu will just say "unknown"), aim at them and use [b]Preset of target NPC[/b] in the menu.[/i]
 
 
 ==================================================================
@@ -52,6 +54,8 @@ HOW TO USE
 [b]Handy extras (all optional)[/b]
 [list]
 [*][b]Re-roll a body on the spot[/b] - aim at someone and press the re-roll key for a brand-new body for that person. Re-bindable; works in VR (it uses where you're looking).
+[*][b]Hotkeys, your way[/b] - the re-roll, exclude-one-NPC and export-preset keys are all re-bindable, and a [b]Reset keybinds[/b] button puts them back to defaults (and clears any you don't want) in one click. All the hotkeys work on desktop and in VR.
+[*][b]Export a body as a preset[/b] - aim at anyone and press the export key to save their exact body as a BodySlide preset file, ready to reuse or share.
 [*][b]Tune the look[/b] - simple sliders set how varied and how curvy bodies are, how common athletic or unusual figures are, and an overall heavier/leaner dial.
 [*][b]Women and men[/b] - turn each on or off independently, and make men slimmer or beefier to taste.
 [*][b]Leave certain mods alone[/b] - an Exclusions list shows every mod that adds NPCs, each with a checkbox. Tick a follower or custom-NPC mod and OBW won't touch its hand-made bodies. Your choices are remembered across all your saves.
@@ -94,8 +98,8 @@ Make sure your CBBE / 3BA (female) and HIMBO (male) bodies are built in BodySlid
 REQUIREMENTS
 ==================================================================
 [list]
-[*]SKSE64
-[*]Address Library for SKSE Plugins
+[*]SKSE64 matching your game executable (Steam Skyrim 1.7.104.0: SKSE 2.3.1)
+[*]Address Library for SKSE Plugins matching your game executable (Steam 1.7.104.0: All in One (1.7.104.0) v13). Check that Data/SKSE/Plugins/versionlib-1-7-104-0.bin is visible in your mod manager's effective Data tree.
 [*][b]OBody NG[/b] (required)
 [*]RaceMenu
 [*]SkyUI (for the settings menu)
@@ -121,6 +125,12 @@ No - everyone keeps their body. You can deliberately re-roll one person with a h
 
 [b]Men too?[/b]
 Yes. Women and men are both supported and can be toggled independently.
+
+[b]Does it work in VR?[/b]
+Yes. All the hotkeys - re-roll, exclude and export - work in VR, using where you're looking as the target. If a bound key ever gets in your way, the "Reset keybinds" button in the menu clears it.
+
+[b]Which preset is an NPC using?[/b]
+In OBody Sim Weight and Procedural Oriented modes, aim at them and press "Preset of target NPC" in the menu. (OBW takes the preset over from OBody, so OBody's own menu would just say "unknown" - OBW remembers it for you.)
 
 
 ==================================================================
