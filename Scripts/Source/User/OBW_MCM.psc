@@ -20,11 +20,14 @@ int _raceOption     = -1
 int _keyOption      = -1
 int _exclKeyOption  = -1
 int _exportKeyOption = -1
+int _resetKeysOption = -1
+int _presetOfTargetOption = -1
 int _reprocessOption = -1
 int _biasOption     = -1
 int _seedOption     = -1
 int _reseedOption   = -1
 int _debugOption    = -1
+int _neuralOption   = -1
 
 string[] _modeLabels
 string[] _bodyLabels
@@ -113,7 +116,8 @@ Event OnPageReset(string page)
         seedFlag = OPTION_FLAG_NONE
     endif
 
-    ; Realism-axis gating by base body (0 auto/unknown, 1 CBBE, 2 BHUNP): Natural (BHUNP-flavor) is for CBBE
+    ; Base-body selection (0 auto/unknown, 1 CBBE, 2 BHUNP) also selects the matching female BodyNet.
+    ; Realism-axis gating: Natural (BHUNP-flavor) is for CBBE
     ; users, Curvy (3BA-flavor) is for BHUNP users. Disable the one that doesn't match the resolved base; show
     ; both when ambiguous. Both still require procedural mode + Female bodies (femProcFlag).
     int base = OBW_Native.GetBaseBody()
@@ -131,6 +135,13 @@ Event OnPageReset(string page)
     _bodyOption = AddMenuOption("Generation mode", _bodyLabels[gm])
     _modeOption = AddMenuOption("Weight mode", _modeLabels[wm])
     _biasOption = AddSliderOption("Bias (size)", OBW_Native.GetBias(), "{0}")
+    ; BodyNet: greyed out unless at least one model file (bodynet_*.obwnet) actually loaded, so the
+    ; toggle can never be switched on into a no-op.
+    int neuralFlag = OPTION_FLAG_DISABLED
+    if OBW_Native.GetNeuralAvailable()
+        neuralFlag = OPTION_FLAG_NONE
+    endif
+    _neuralOption = AddToggleOption("AI body generation", OBW_Native.GetNeuralBody(), neuralFlag)
     AddEmptyOption()
 
     ; Sexes: which bodies OBW manages + male-only tuning.
@@ -143,9 +154,11 @@ Event OnPageReset(string page)
     ; Apply & hotkey.
     AddHeaderOption("Apply")
     _reprocessOption = AddTextOption("Reprocess all loaded NPCs", "[ Click ]")
+    _presetOfTargetOption = AddTextOption("Preset of target NPC", "[ Aim + Click ]")
     _keyOption = AddKeyMapOption("Re-roll key", OBW_Native.GetReRollKey())
     _exclKeyOption = AddKeyMapOption("Exclude target key", OBW_Native.GetExcludeKey())
     _exportKeyOption = AddKeyMapOption("Export body preset key", OBW_Native.GetExportKey())
+    _resetKeysOption = AddTextOption("Reset keybinds", "[ Click ]")
 
     ; ── RIGHT COLUMN: per-mode / distribution settings ──────────────────
     ; Procedural variety: the distribution dials for the procedural modes (0 / 2).
@@ -429,12 +442,48 @@ Event OnOptionSelect(int option)
             mf = OPTION_FLAG_NONE
         endif
         SetOptionFlags(_maleBuildOption, mf)
+    elseif option == _neuralOption
+        bool newNeu = !OBW_Native.GetNeuralBody()
+        OBW_Native.SetNeuralBody(newNeu)
+        SetToggleOptionValue(_neuralOption, newNeu)
+        ; Bodies only change when an NPC is next processed - point the player at Reprocess.
+        if newNeu
+            Debug.Notification("OBW: AI body generation on - use Reprocess to apply.")
+        else
+            Debug.Notification("OBW: AI body generation off - use Reprocess to apply.")
+        endif
     elseif option == _debugOption
         bool newDbg = !OBW_Native.GetDebugLog()
         OBW_Native.SetDebugLog(newDbg)
         SetToggleOptionValue(_debugOption, newDbg)
     elseif option == _reprocessOption
         SendModEvent("OBW_Reprocess")   ; OBW_Quest re-queues all loaded NPCs + arms the drain
+    elseif option == _presetOfTargetOption
+        ; Show which OBody preset shaped the NPC you're aiming at (modes 1 & 2). OBW unassigns the preset in
+        ; OBody after taking over, so OBody itself reports "unknown"; OBW kept the name.
+        Actor tgt = Game.GetCurrentCrosshairRef() as Actor
+        if !tgt
+            Debug.MessageBox("OBW: aim at an NPC first, then click this option.")
+        else
+            string pn = OBW_Native.GetActorPresetName(tgt)
+            if pn == ""
+                Debug.MessageBox(tgt.GetActorBase().GetName() + ": procedural body (no OBody preset).")
+            else
+                Debug.MessageBox(tgt.GetActorBase().GetName() + " is using OBody preset:\n" + pn)
+            endif
+        endif
+    elseif option == _resetKeysOption
+        ; Restore the defaults: re-roll = [ (DX scancode 26), exclude + export unbound (0).
+        ; Fixes "I bound exclude and now can't clear it" - SkyUI's keymap widget can rebind but not unbind.
+        OBW_Native.SetReRollKey(26)
+        OBW_Native.SetExcludeKey(0)
+        OBW_Native.SetExportKey(0)
+        SetKeyMapOptionValue(_keyOption, 26)
+        SetKeyMapOptionValue(_exclKeyOption, 0)
+        SetKeyMapOptionValue(_exportKeyOption, 0)
+        int hReset = ModEvent.Create("OBW_RebindKey")   ; re-arm the C++/Papyrus key state to the new values
+        ModEvent.Send(hReset)
+        Debug.Notification("OBW: keybinds reset (re-roll = [ , exclude and export unbound).")
     elseif _exclPlugins
         ; Exclusions page: page nav first, then the per-plugin checkboxes.
         if _exclPrevOption != -1 && option == _exclPrevOption
@@ -494,7 +543,7 @@ Event OnOptionHighlight(int option)
     elseif option == _curvyOption
         SetInfoText("How many women get a fuller, curvier, more exaggerated shape - the opposite of Natural. For BHUNP users who want some of the curvier look. The rest keep the default. Off by default.")
     elseif option == _baseBodyOption
-        SetInfoText("Which body you use. It just decides which option is shown: Natural for CBBE / 3BA, Curvy for BHUNP. Leave on Auto-detect unless it guesses wrong, then set it yourself.")
+        SetInfoText("Which female body you use. It selects the matching AI generator and decides which realism option is shown: Natural for CBBE / 3BA, Curvy for BHUNP. Leave on Auto-detect unless it guesses wrong, then set it yourself.")
     elseif option == _clothedRefitOption
         SetInfoText("A gentle 'dressed vs nude' adjustment. When an NPC is wearing clothes her body is trimmed a little so the clothes sit better; undressed, she has her full body. 0% = dressed and nude look the same.")
     elseif option == _raceOption
@@ -511,10 +560,16 @@ Event OnOptionHighlight(int option)
         SetInfoText("The seed for this playthrough. The same seed always produces the same bodies.")
     elseif option == _reseedOption
         SetInfoText("Rolls a new seed. NPCs you've already met keep their bodies; only NPCs you haven't met yet use the new seed.")
+    elseif option == _neuralOption
+        SetInfoText("Uses AI to build bodies. Shapes tend to come out better proportioned. Use Reprocess after changing it.")
     elseif option == _debugOption
         SetInfoText("Writes extra detail to the log file. Leave it off - only turn it on if you're troubleshooting a problem.")
     elseif option == _reprocessOption
         SetInfoText("Re-applies bodies to the NPCs around you right now, without waiting to walk between areas. Use it after changing a setting. (In Random mode it also gives them fresh bodies.)")
+    elseif option == _presetOfTargetOption
+        SetInfoText("In OBody Sim Weight and Procedural Oriented modes, aim your crosshair at an NPC and click this to see which OBody preset their body is based on. (OBW takes the preset over, so OBody's own menu would just say 'unknown'.)")
+    elseif option == _resetKeysOption
+        SetInfoText("Restores the hotkeys to their defaults: re-roll back to the [ key, and the exclude and export keys unbound. Use this if you bound a key and want to clear it (the rebind widget can change a key but not remove it).")
     elseif _exclPlugins
         SetInfoText("Tick a mod to leave its NPCs alone - OBW won't touch them, so custom-bodied followers keep their look. Your choices are remembered across saves.")
     endif

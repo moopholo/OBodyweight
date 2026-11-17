@@ -1,0 +1,9 @@
+[b]Version 1.6.2[/b]
+
+[list]
+[*]Rebuilt the SKSE plugin with CommonLibSSE-NG v15 for Skyrim AE 1.7.104 and Address Library format 5. The same DLL still targets SE, AE and VR.
+[*]Updated crosshair targeting, HUD notifications and neck-tint access for the current CommonLib API.
+[*]Fixed the installer archive so the Balanced, Realistic and Fantasy starting presets are actually included. The Balanced release default has AI body generation off; you can enable it in the MCM.
+[/list]
+
+[i]Steam Skyrim 1.7.104.0 needs SKSE 2.3.1 and the matching Address Library All in One (1.7.104.0) v13. In MO2 or Vortex, check that Data/SKSE/Plugins/versionlib-1-7-104-0.bin is visible to the game. Other game versions need their matching SKSE and Address Library files. No settings reset is required.[/i]

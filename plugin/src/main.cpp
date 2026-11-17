@@ -1,6 +1,15 @@
+// OBodyNG Weight - procedural and learned NPC body generation for Skyrim SE/AE.
+// Copyright (C) 2026 Geovane H. F. Pires
+//
+// This program is free software: you can redistribute it and/or modify it under the terms of
+// the GNU General Public License as published by the Free Software Foundation, either version
+// 3 of the License, or (at your option) any later version. It is distributed WITHOUT ANY
+// WARRANTY; see the GNU General Public License for details: <https://www.gnu.org/licenses/>.
+
 #include <SKSE/SKSE.h>
 #include <RE/Skyrim.h>
 #include "WeightManager.hpp"
+#include "BodyNet.hpp"
 #include "Config.hpp"
 #include "MorphInterface.hpp"
 
@@ -169,13 +178,29 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
         messaging->RegisterListener([](SKSE::MessagingInterface::Message* a_msg) {
             if (a_msg->type == SKSE::MessagingInterface::kPostPostLoad) {
                 SKEE::InterfaceExchangeMessage msg;
-                SKSE::GetMessagingInterface()->Dispatch(
+                const bool dispatched = SKSE::GetMessagingInterface()->Dispatch(
                     SKEE::InterfaceExchangeMessage::kExchangeInterface, &msg,
                     sizeof(SKEE::InterfaceExchangeMessage*), "skee");
-                if (msg.interfaceMap)
-                    OBW::g_morph = static_cast<SKEE::IBodyMorphInterface*>(
+                OBW::g_morph = nullptr;
+                if (!dispatched) {
+                    SKSE::log::error("SKEE interface test failed: exchange dispatch failed. OBW remains active; morph application disabled.");
+                } else if (!msg.interfaceMap) {
+                    SKSE::log::error("SKEE interface test failed: no interface map returned. OBW remains active; morph application disabled.");
+                } else {
+                    auto* candidate = static_cast<SKEE::IBodyMorphInterface*>(
                         msg.interfaceMap->QueryInterface("BodyMorph"));
-                SKSE::log::info("SKEE BodyMorph interface: {}", OBW::g_morph ? "acquired" : "NOT FOUND");
+                    if (!candidate) {
+                        SKSE::log::error("SKEE interface test failed: BodyMorph not provided. OBW remains active; morph application disabled.");
+                    } else {
+                        const auto version = candidate->GetVersion();
+                        if (version == 0) {
+                            SKSE::log::error("SKEE interface test failed: BodyMorph reported version 0. OBW remains active; morph application disabled.");
+                        } else {
+                            OBW::g_morph = candidate;
+                            SKSE::log::info("SKEE interface test passed: BodyMorph version {} acquired", version);
+                        }
+                    }
+                }
             } else if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
                 // Independent distribution: hook actor 3D-load so procedural mode works without OBody.
                 if (auto* holder = RE::ScriptEventSourceHolder::GetSingleton()) {
@@ -202,6 +227,35 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
         });
     }
 
-    SKSE::log::info("OBodyNGWeight loaded");
+    // BodyNet: load the learned body model if present. Soft: a missing or malformed file only disables the
+        // feature (named reason in the log) - OBW then behaves exactly as it always has.
+        {
+            using Slot = OBW::BodyNet::Slot;
+            const struct { Slot slot; const char* name; const char* path; } kModels[] = {
+                // RAW literals on purpose. Written as a plain string, "...OBodyNGWeight\bodynet..." turns
+                // \b into a BACKSPACE and \S \P \O silently drop their backslash, so the path resolved to
+                // "DataSKSEPluginsOBodyNGWeightodynet_f3ba.obwnet" and both models failed to open with the
+                // MCM toggle greyed out (2026-08-31). Keep every model path as a raw literal.
+                { Slot::Female,      "female/F3BA", R"(Data\SKSE\Plugins\OBodyNGWeight\bodynet_f3ba.obwnet)"   },
+                { Slot::FemaleBHUNP, "female/BHUNP", R"(Data\SKSE\Plugins\OBodyNGWeight\bodynet_fbhunp.obwnet)" },
+                { Slot::Male,        "male/HIMBO",   R"(Data\SKSE\Plugins\OBodyNGWeight\bodynet_mhimbo.obwnet)" },
+            };
+            for (const auto& mdl : kModels) {
+                std::string err;
+                if (OBW::BodyNet::Load(mdl.slot, mdl.path, err))
+                    SKSE::log::info("BodyNet[{}]: loaded ({} sliders, {} archetypes)", mdl.name,
+                                    OBW::BodyNet::SliderNames(mdl.slot).size(),
+                                    OBW::BodyNet::ArchetypeCount(mdl.slot));
+                else
+                    SKSE::log::info("BodyNet[{}]: disabled - {}", mdl.name, err);
+            }
+            // Log the INI default beside the live flag: the two disagreeing is the signature of the
+            // config not having been read (an INI saved with LF-only line endings, for one - the Win32
+            // profile API wants CRLF), which would silently opt every new game in or out.
+            SKSE::log::info("BodyNet: feature is {} (INI default {})",
+                            OBW::WeightManager::GetSingleton().GetNeuralBody() ? "ON" : "off (opt-in)",
+                            OBW::Config::g_defaultNeuralBody ? "on" : "off");
+        }
+        SKSE::log::info("OBodyNGWeight loaded");
     return true;
 }

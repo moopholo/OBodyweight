@@ -1,3 +1,80 @@
+Fork build 1.6.2.x (moopholo/OBodyweight)
+
+Upstream OBodyNG Weight 1.6.2 (everything below) merged with the fork's additions. Release tags are
+v1.6.2.N; install over the base OBodyNG Weight 1.6.2 (the Papyrus scripts come from it).
+- Configurable female body archetypes: OBodyNGWeight_Archetypes.ini (Weight, FrameBias, FrameScale and
+  every shape offset per archetype; no rebuild). Ships tuned toward a curvy / slim-thick family.
+- Configurable male (HIMBO) archetypes: OBodyNGWeight_MaleArchetypes.ini (Weight, Muscle, Fat, ...).
+- Race & group body rules: OBodyNGWeight_Races.ini. Per-group archetype multipliers, ABSOLUTE hard
+  excludes (independent of Race coherence), frame bias, and custom groups matched by race substring.
+  Default rule: elders never roll the "sexy" / peak-athletic archetypes.
+- The rules gate BodyNet too: the archetype roll (weights, multipliers, excludes) runs before the
+  generator, so an excluded archetype is never passed to it, and the group frame bias feeds its weight
+  input. The roll can no longer fall through to an excluded first archetype on float rounding.
+- Ships with NeuralBody=0 (procedural), since the archetype shape offsets drive only the procedural path.
+- Game-free ShapeCore module + doctest unit tests; host tests now also cover BodyNet (the shipped models
+  load, are deterministic per seed and stay inside their per-slider ceilings).
+- GitHub CI: Windows DLL build + tests on every PR, automatic MO2-installable release on merge.
+
+Version 1.6.2
+
+- Rebuilt against CommonLibSSE-NG v15 for Skyrim AE 1.7.104 and its Address Library format 5.
+  SE, AE and VR support remains enabled in the same DLL.
+- Updated crosshair targeting, HUD notifications and neck-tint access for the current CommonLib API.
+- On Steam Skyrim 1.7.104, install SKSE 2.3.1 and Address Library All in One (1.7.104.0) v13.
+  The game must see Data/SKSE/Plugins/versionlib-1-7-104-0.bin. No settings reset is needed.
+- Fixed the release archive so its FOMOD includes the Balanced, Realistic and Fantasy starting presets.
+
+Version 1.6.1
+
+- Improved stability around RaceMenu/SKEE morph initialization. OBW now verifies the BodyMorph interface,
+  the actor and its base before beginning a body application. If a required value is unavailable, that
+  application is skipped and the exact reason is written to OBodyNGWeight.log; the plugin remains active.
+- Fixed the unsafe fallback used by Procedural, Procedural Oriented and OBody Sim Weight when SKEE was not
+  ready. It previously called OBody's morph-reset routine, which can dereference OBody's unavailable
+  interface. OBW now leaves the actor untouched until a valid interface is available.
+- Queued applications now verify that the actor still has loaded 3D before changing morphs. This prevents
+  stale tasks from applying to NPCs that unloaded while waiting in the queue.
+- Hardened reroll and preset-export status messages for actors with no display name.
+
+Version 1.6.0
+
+Fixed a RaceMenu/SKEE crash during crowded-cell body distribution. OBody announces a morph apply before
+SKEE's asynchronous TRI rebuild has necessarily finished; OBW could immediately start another rebuild for
+the same NPC while the first was still using MorphFileCache (observed on a 3BA CrotchGap morph). Morph events
+are now debounced for five seconds of quiet and OBW submits at most one NPC rebuild per timer tick.
+
+New: "AI body generation" in the menu, under Generation. Instead of the built-in slider rules, bodies are built by a small generator trained on thousands of hand-made BodySlide presets, so proportions hold together more like something a person actually sculpted. It is off by default - turn it on and use "Reprocess all loaded NPCs" to see the change.
+
+Nothing you rely on changes: the same NPC still gets the same body from the same seed, OBW still picks the archetype and the weight, and every slider still passes the same safety limits, so a body can never come out broken. If the generator ever produced something out of range it is refused outright and that NPC falls back to the built-in rules.
+
+Your settings still drive it. Bias, Weight mode, Fantasy NPCs, Unusual bodies, Race coherence, Morph intensity and Clothed refit all work as before. "Natural women", "Curvy women", "Athletic women" and "Male build" work too - rather than nudging a finished body, the generator was taught what each of those looks like from the preset library, so asking for a curvy or an athletic body gives you one somebody would plausibly have sculpted. How MANY NPCs get them is unchanged: still your sliders.
+
+The rare eye-catching bodies are now built the way preset authors actually build a show-stopper - which sliders they push and which they deliberately leave alone - instead of an ordinary body scaled up. How often they show up is untouched; that is still the "Fantasy NPCs" slider.
+
+Women use separate F3BA and BHUNP generators, and men use a HIMBO generator. BHUNP is selected from the existing Base body setting; ambiguous female setups safely use F3BA. If a model is missing, that body falls back without affecting the others.
+
+Female weight conditioning was retrained against each preset's paired small/big endpoints. F3BA now reproduces 60% of the corpus's global weight response (up from 33%); BHUNP reaches 67% and passes the visible weight-effect gate that its earlier experimental model failed.
+
+"Unusual breasts" now works with AI body generation too. Its deterministic post-process changes only BreastGravity2 and BreastPerkiness, remains gated by generated breast size, and uses the same safety ceilings as the built-in path.
+
+Version 1.5.3
+
+- Fixed the exclude/export hotkeys doing nothing in VR (regression in 1.5.2). The native hotkey handler
+  only listened to the keyboard, but in VR bound keys come from the controllers - so aiming at an NPC and
+  pressing the exclude key did nothing at all. It now responds on every input device (keyboard, mouse,
+  gamepad and both VR controllers), just like the old script-based hotkeys did.
+- Added a "Reset keybinds" button in the menu. Restores the re-roll key to the default ([) and clears the
+  exclude and export keys. Fixes being stuck with a bound key you couldn't remove (the rebind widget can
+  change a key, but not unbind it).
+- Procedural Oriented at 100% now actually gives you the preset. Before, the blend only touched OBW's own
+  sliders, so at full strength every other slider the preset set was dropped and the body snapped to
+  something else. The blend now covers the whole preset - at 100% the body matches the OBody preset
+  exactly, and any value in between is a true blend between the generated body and the preset.
+- You can now see which OBody preset an NPC is using. In OBody Sim Weight and Procedural Oriented modes,
+  aim at an NPC and use the new "Preset of target NPC" button in the menu - it shows the preset name that
+  OBW took over (OBody's own menu just says "unknown" because OBW unassigns it).
+
 Version 1.5.2
 
 - Fixed bodies visibly re-morphing on their own from time to time. OBody announces every morph apply,

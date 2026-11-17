@@ -55,10 +55,17 @@ Generation mode (Procedural Morphs / OBody Sim Weight / Procedural Oriented), We
 (Oriented mode), Seed, a re-bindable **Re-roll key**, and a **Debug logging** toggle. Options
 grey out when they don't apply to the selected mode.
 
+The optional **AI body generation** path uses small local models trained on community BodySlide
+presets. F3BA, BHUNP and HIMBO have separate generators; `Base body` selects the female model. The
+same seed remains deterministic, all outputs retain OBW's mesh-safety ceilings, and missing models
+fall back safely. Unusual breasts remains effective through a deterministic sag/perk post-process.
+
 ## Requirements
 
-- Skyrim SE/AE + **SKSE64**
-- **Address Library for SKSE Plugins**
+- Skyrim SE/AE + **SKSE64** matching the installed Skyrim executable (Steam 1.7.104.0: SKSE 2.3.1)
+- **Address Library for SKSE Plugins** matching the installed Skyrim executable (Steam 1.7.104.0:
+  All in One (1.7.104.0) v13; check `Data/SKSE/Plugins/versionlib-1-7-104-0.bin` in your mod
+  manager's effective Data tree)
 - **OBody NG** (hard requirement — master of the plugin)
 - **RaceMenu / SKEE** (NiOverride body morphs)
 - **SkyUI** (MCM)
@@ -141,6 +148,15 @@ soft, natural, mature shapes instead, regardless of the coherence slider. The
 shipped file is a documented template with every override commented out (so a fresh
 install runs on the built-in defaults); uncomment to retune.
 
+### With AI body generation (BodyNet, upstream 1.6.0+)
+
+Both tables above keep working when **AI body generation** is on, but at different stages. The
+archetype *roll* — `Weight`s, race `Mult.*`, hard `Exclude`s, custom groups — happens first and
+picks the archetype BodyNet is conditioned on, so an excluded archetype never reaches the generator;
+`FrameBias` still shifts the mock weight it's given. The per-archetype *shape* keys (`Breasts`, `Butt`,
+`Waist`, `Muscle`, …) only drive the procedural generator — BodyNet learned its own shapes from real
+presets. The fork ships `NeuralBody=0` so the tuned shapes are what you see by default.
+
 ## Compatibility
 
 - Female slider names target CBBE 3BA; male names target HIMBO. Other bodies use different
@@ -184,6 +200,6 @@ they only run when OBW is installed.
 
 - **OBody NG** — Aietos (original **OBody** by Sinhime)
 - **RaceMenu / SKEE** — Expired · **SKSE64** — ianpatt, behippo, purplelunchbox
-- **Address Library** — meh321 · **CommonLibSSE-NG** — CharmedBaryon (orig. Ryan-rsm-McKenzie)
+- **Address Library** — meh321 · **CommonLibSSE-NG** — alandtse and contributors (orig. Ryan-rsm-McKenzie)
 - **SkyUI** — SkyUI Team · **CBBE / 3BA** — Ousnius & Caliente, Acro748 · **HIMBO** — Shino
 - **BodySlide** — Ousnius & Caliente · **spdlog** — gabime

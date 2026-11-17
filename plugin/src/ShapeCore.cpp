@@ -177,6 +177,17 @@ float GroupArchMult(const std::string& group, const std::string& archetype,
     return 1.0f + (raw - 1.0f) * strength;
 }
 
+int WeightedPick(std::span<const float> weights, float r) {
+    int lastPositive = -1;
+    for (std::size_t i = 0; i < weights.size(); ++i) {
+        const float w = weights[i];
+        if (w > 0.0f) lastPositive = static_cast<int>(i);
+        if (r < w) return static_cast<int>(i);
+        r -= w;
+    }
+    return lastPositive;
+}
+
 float GroupFrameBias(const std::string& group, const RaceRules& rules, float strength) {
     if (strength <= 0.0f) return 0.0f;
     auto git = rules.groups.find(group);

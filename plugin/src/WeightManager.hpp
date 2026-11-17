@@ -156,6 +156,26 @@ public:
     // owned by OBW so it survives OBW's re-assert). When an OBW-managed actor is DRESSED (body-slot armor worn),
     // the soft sliders are trimmed by this fraction on a separate "OBWClo" morph key; NUDE clears it. Idempotent
     // (the delta is recomputed from the full "OBW" value each time), so no drift. 0 = off (dressed == nude).
+    // BODYNET (learned body generator, 2026-08-31). OFF by default: the procedural path is unchanged
+    // and stays the fallback. When ON *and* a model file loaded, F3BA/BHUNP/HIMBO slider values come
+    // from body-specific nets trained on community presets instead of hand-written derivation ratios.
+    // Measured against those presets it reproduces their joint distribution ~3.5x better at equal mesh
+    // safety (tools/bodynet/BODYNET.md). Everything else OBW owns is untouched: archetype roll, race
+    // coherence, physics tiers, and the per-actor determinism.
+    bool          GetNeuralBody() const noexcept { return _neuralBody; }
+    void          SetNeuralBody(bool on)         { _neuralBody = on; }
+    // Fills a_out with the selected model's values (0-100, clamped) for this actor, or returns false when the
+    // feature is off / no model loaded / the actor is not on the supported path -> caller keeps the
+    // procedural code. Names come from the model file; the caller matches BY NAME.
+    bool          BuildNeuralBody(RE::Actor* a_actor, std::vector<std::pair<std::string, float>>& a_out);
+    // The two v3 conditioning axes, derived from the MCM dials the learned path used to bypass.
+    float         GetShape01(RE::Actor* a_actor);   // Natural<->Curvy (female) / Male build (male)
+    float         GetTone01(RE::Actor* a_actor);    // muscle definition - the Athletic dial
+    // How "natural" this NPC's body should read, 0..1. Derived from the SAME seeded roll that drives
+    // GetActorIntensity, so the exuberant NPCs are the very same ones, at the very same rate, and
+    // _fantasyRatio (the MCM dial) keeps its exact meaning.
+    float         GetNaturalness(RE::Actor* a_actor);
+
     float         GetClothedRefit() const noexcept { return _clothedRefit; }
     void          SetClothedRefit(float r)         { _clothedRefit = std::clamp(r, 0.0f, 0.5f); }
     // Apply/clear the clothed-refit delta for an actor at its CURRENT worn state. force = recompute even if the
@@ -221,11 +241,17 @@ public:
     // Locked: cell-attach (loading thread) and Papyrus VM both touch these containers.
     bool HasProcessed(RE::FormID id) const  { std::scoped_lock l(_mutex); return _processed.contains(id); }
     void MarkProcessed(RE::FormID id)       { std::scoped_lock l(_mutex); _processed.insert(id); }
-    void ClearProcessed()                   { std::scoped_lock l(_mutex); _processed.clear(); _morphQueue.clear(); _fallbackWatch.clear(); _clothedState.clear(); }
+    void ClearProcessed()                   { std::scoped_lock l(_mutex); _processed.clear(); _morphQueue.clear(); _morphReadyAt.clear(); _fallbackWatch.clear(); _clothedState.clear(); }
 
     // One-shot flag: set before UpdateModelWeight(true), consumed by next OnActorGenerated.
     // Prevents the OBody re-fire loop without blocking future legitimate events.
     void MarkMorphsApplied(RE::FormID id)  { std::scoped_lock l(_mutex); _morphsApplied.insert(id); StampApplyLocked(id); }
+
+    // Remember / read the OBody preset an actor's body derives from (modes 1 = Sim Weight, 2 = Oriented).
+    // OBW unassigns the preset in OBody after taking over, so this is the only place the name survives -
+    // the MCM/dossier reads it back instead of showing "unknown". Empty = none recorded (procedural mode 0).
+    void SetPresetName(RE::FormID id, std::string_view n) { std::scoped_lock l(_mutex); if (n.empty()) _presetName.erase(id); else _presetName[id] = n; }
+    std::string GetPresetName(RE::FormID id) { std::scoped_lock l(_mutex); auto it = _presetName.find(id); return it == _presetName.end() ? "" : it->second; }
 
     // TIME-WINDOW re-fire suppression (2026-07-20, the "bodies re-apply from time to time" loop): the
     // Papyrus OnActorGenerated path consumes the one-shot above, but the C++ Obody_ApplyMorph sink used to
@@ -239,6 +265,14 @@ public:
     }
     bool RecentlyApplied(RE::FormID id, double a_windowMs = 2500.0) {
         std::scoped_lock l(_mutex);
+        return RecentlyAppliedLocked(id, a_windowMs);
+    }
+    // Lock-free variant for callers already holding _mutex (e.g. QueueForMorphs). Same 2.5s window: an
+    // OnActorGenerated re-fire this soon after OUR apply is the equip-churn loop (an outfit change rebuilds
+    // the biped 3D -> OBody re-fires -> we'd re-roll her in mode 1), NOT a cell crossing (those land far
+    // later) nor the first distribution (nothing stamped yet at first enqueue). Kills "open ledger/change
+    // gear -> managed body re-rolls" without blocking legit re-processing.
+    bool RecentlyAppliedLocked(RE::FormID id, double a_windowMs = 2500.0) {
         auto it = _recentApply.find(id);
         if (it == _recentApply.end()) return false;
         const double now = std::chrono::duration<double, std::milli>(
@@ -254,9 +288,10 @@ public:
     }
 
     // Morph queue — owned by C++; Papyrus only asks for next actor to process.
-    void          QueueForMorphs(RE::Actor* a_actor);
+    // Debounced because OBody/SKEE continues ApplyBodyMorphs asynchronously after its event fires.
+    void          QueueForMorphs(RE::Actor* a_actor, bool a_debounce = true);
     RE::Actor*    GetNextMorphActor();        // returns nullptr when queue is empty
-    bool          HasMorphsPending() const   { return !_morphQueue.empty(); }
+    bool          HasMorphsPending() const   { std::scoped_lock l(_mutex); return !_morphQueue.empty(); }
 
     // Independent distribution (procedural fallback) — so procedural bodies work even with an EMPTY
     // preset library (when OBody never fires OnActorGenerated), and for NPCs OBody's own distribution
@@ -348,8 +383,9 @@ private:
     float         _raceCoherence{ 1.0f };  // race-typed archetype distribution strength (0 = off/legacy uniform)
     float         _naturalRatio{ 0.20f };  // fraction of women given the BHUNP-derived "natural" body profile
     float         _curvyRatio{ 0.0f };     // fraction given the 3BA-style curvier profile (opposite pole; off by default)
-    int           _baseBodyPref{ 0 };      // 0 auto-detect, 1 CBBE(3BA), 2 BHUNP (gates the MCM toggle relevance)
+    int           _baseBodyPref{ 0 };      // 0 auto, 1 CBBE(3BA), 2 BHUNP (female model + MCM relevance)
     mutable int   _baseBodyCache{ -1 };    // resolved GetBaseBody(), cached (-1 = not resolved yet)
+    bool          _neuralBody{ false };   // BodyNet opt-in (INI/MCM); procedural is the default + fallback
     float         _clothedRefit{ 0.10f };  // dressed-body trim on the soft sliders (0 = off; OBW's own ORefit)
     std::unordered_map<RE::FormID, bool> _clothedState;  // runtime cache of last-applied clothed state (not serialized)
     bool          _femaleBodies{ true };   // process female NPCs at all (morphs)
@@ -363,10 +399,15 @@ private:
     std::unordered_set<RE::FormID>                _morphsApplied;
     std::unordered_map<RE::FormID, double>        _recentApply;     // formID -> steady-clock ms of OUR last apply (re-fire window)
     std::vector<RE::FormID>                       _morphQueue;
+    std::unordered_map<RE::FormID, double>        _morphReadyAt;    // formID -> quiet-period deadline before SKEE rebuild
     std::unordered_map<RE::FormID, std::uint32_t> _overrideSeed;
     std::unordered_map<RE::FormID, int>           _fallbackWatch;   // id -> grace ticks before self-distributing
+    std::unordered_map<RE::FormID, std::string>   _presetName;      // id -> OBody preset the actor's body came from
+                                                                    // (modes 1/2); OBW unassigns it in OBody, so we
+                                                                    // remember it here to show in the MCM ("unknown" fix)
 
     static constexpr int kFallbackGraceTicks = 2;   // SweepFallback ticks (~2s each) to wait for OBody first
+    static constexpr double kMorphSettleMs = 5000.0; // reset per enqueue; lets OBody/SKEE async work finish
 
 public:
     static constexpr std::uint32_t kRecordUID  = 'OBWS';
@@ -387,6 +428,7 @@ private:
     static constexpr std::uint32_t kRecordCrv  = 'CURV';   // curvy-body ratio (3BA-style pole)
     static constexpr std::uint32_t kRecordBBd  = 'BBDY';   // base-body preference (auto/CBBE/BHUNP)
     static constexpr std::uint32_t kRecordClo  = 'CLOR';   // clothed-refit strength
+    static constexpr std::uint32_t kRecordNeu  = 'NEUR';   // BodyNet on/off (per save, like every other toggle)
     static constexpr std::uint32_t kRecordKey  = 'RKEY';
     static constexpr std::uint32_t kRecordMale = 'MALE';
     static constexpr std::uint32_t kRecordFem  = 'FMLE';   // female-bodies master toggle

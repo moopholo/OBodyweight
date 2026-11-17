@@ -1,15 +1,18 @@
 #include "WeightManager.hpp"
+#include "BodyNet.hpp"
 #include "FastRandom.hpp"
 #include "Config.hpp"
 #include "ShapeCore.hpp"       // RaceClass + ClassifyRaceStr (now unit-tested)
 #include "MorphInterface.hpp"   // OBW::g_morph (SKEE body-morph interface) for the clothed refit
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <mutex>
 #include <random>
+#include <span>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -29,6 +32,7 @@ WeightManager::WeightManager() {
     _curvyRatio    = Config::g_defaultCurvyRatio;
     _baseBodyPref  = Config::g_defaultBaseBody;
     _clothedRefit  = Config::g_defaultClothedRefit;
+    _neuralBody    = Config::g_defaultNeuralBody;
     _femaleBodies = Config::g_defaultFemaleBodies;
     _maleBodies = Config::g_defaultMaleBodies;
     _maleBuild = Config::g_defaultMaleBuild;
@@ -116,7 +120,7 @@ void WeightManager::ApplyNeckColor(RE::Actor* a_actor) {
     const float k = t > 1.0f ? 1.0f : t;
     int touched = 0;
     RE::BSVisit::TraverseScenegraphGeometries(faceNode, [&](RE::BSGeometry* a_geom) -> RE::BSVisit::BSVisitControl {
-        auto* prop = a_geom->GetGeometryRuntimeData().properties[RE::BSGeometry::States::kEffect].get();
+        auto* prop = a_geom->GetGeometryRuntimeData().shaderProperty.get();
         auto* lp   = netimmerse_cast<RE::BSLightingShaderProperty*>(prop);
         if (!lp || !lp->material) return RE::BSVisit::BSVisitControl::kContinue;
         if (lp->material->GetFeature() != RE::BSShaderMaterial::Feature::kFaceGenRGBTint)
@@ -574,12 +578,22 @@ static std::vector<Archetype> kArchetypes{
     { "Lollipop",        1.0f,  -8.0f, 0.92f,  34,   -8,   -8,   -8,   -4,   18,   -4,    0,    5,  0.02f },  // slim frame + large bust
     { "Strongwoman",     1.0f,  18.0f, 1.00f,   8,   16,   14,   18,   20,   -6,   18,   24,   60,  0.12f },  // heavy + broad + muscular (bruiser/powerlifter, soft over muscle)
 };
-const Archetype& GetArchetype(std::uint32_t seedBase) {
+// Index of the chosen archetype. ONE roller for every consumer (procedural deltas, physics tier, the
+// public name API and BodyNet's archetype input), so the race/group rules - including hard excludes,
+// which zero a weight absolutely - gate all of them identically. OBW::WeightedPick never returns a
+// zero-weight entry, so an excluded archetype can't leak through a float fall-through either.
+int GetArchetypeIndex(std::uint32_t seedBase) {
     std::mt19937 rng{ seedBase ^ 0x0A5C1759u };
-    float total = 0.0f; for (const auto& a : kArchetypes) total += a.weight * RaceArchMult(a.name, false);
-    float r = std::uniform_real_distribution<float>(0.0f, total)(rng);
-    for (const auto& a : kArchetypes) { const float w = a.weight * RaceArchMult(a.name, false); if (r < w) return a; r -= w; }
-    return kArchetypes.front();
+    std::array<float, 64> w{};
+    const std::size_t n = (std::min)(kArchetypes.size(), w.size());
+    float total = 0.0f;
+    for (std::size_t i = 0; i < n; ++i) { w[i] = kArchetypes[i].weight * RaceArchMult(kArchetypes[i].name, false); total += w[i]; }
+    const float r = std::uniform_real_distribution<float>(0.0f, total)(rng);
+    const int idx = OBW::WeightedPick(std::span<const float>(w.data(), n), r);
+    return idx < 0 ? 0 : idx;
+}
+const Archetype& GetArchetype(std::uint32_t seedBase) {
+    return kArchetypes[static_cast<std::size_t>(GetArchetypeIndex(seedBase))];
 }
 // Per-NPC, per-region jitter on the archetype delta (deterministic per seed+region, so it's
 // consistent across every call for the same actor). Different salt from the volume noise so the
@@ -602,14 +616,6 @@ float ArchetypeDelta(std::uint32_t seedBase, const std::string& key) {
     else if (key == "shoulderwidth") d = a.dShoulders;
     else return 0.0f;
     return d + DeltaJitter(seedBase, key);
-}
-// Index of the chosen archetype (same deterministic roll as GetArchetype) — for the physics tier.
-int GetArchetypeIndex(std::uint32_t seedBase) {
-    std::mt19937 rng{ seedBase ^ 0x0A5C1759u };
-    float total = 0.0f; for (const auto& a : kArchetypes) total += a.weight * RaceArchMult(a.name, false);
-    float r = std::uniform_real_distribution<float>(0.0f, total)(rng);
-    for (std::size_t i = 0; i < kArchetypes.size(); ++i) { const float w = kArchetypes[i].weight * RaceArchMult(kArchetypes[i].name, false); if (r < w) return static_cast<int>(i); r -= w; }
-    return 0;
 }
 // CBPC physics tier per archetype (SAME order as kArchetypes):
 // 0 default / 1 toned (firm) / 2 lean (small) / 3 full (soft) / 4 heavy (max jiggle).
@@ -1052,6 +1058,147 @@ float WeightManager::GetActorIntensity(RE::Actor* a_actor) {
     return intensity * _morphScale;
 }
 
+// ── BodyNet: the learned body generator (2026-08-31) ────────────────────────────────────────────
+// Naturalness is derived from the SAME seeded roll GetActorIntensity uses, so switching the feature on
+// does not change WHO is exuberant or HOW OFTEN - only how their body is built. _fantasyRatio (the MCM
+// dial) therefore keeps its exact meaning, and the striking NPCs stay as rare and as striking as today.
+float WeightManager::GetNaturalness(RE::Actor* a_actor) {
+    if (!a_actor) return 0.75f;
+    std::scoped_lock lock(_mutex);
+    SetRaceCtx(a_actor);
+    const RE::FormID id = a_actor->GetFormID();
+    std::mt19937 rng{ GetActorSeed(id) ^ 0x5A11FA57u };   // SAME stream as GetActorIntensity
+
+    const int uv = UnusualVariant(id);
+    if (uv == 1) return std::uniform_real_distribution<float>(0.00f, 0.15f)(rng);  // ultra-thick: the extreme
+    if (uv == 0) return std::uniform_real_distribution<float>(0.25f, 0.50f)(rng);  // ultra-petite: an extreme too
+    if (IsSnuSnu(id)) return std::uniform_real_distribution<float>(0.05f, 0.25f)(rng);
+
+    const float roll = std::uniform_real_distribution<float>(0.0f, 1.0f)(rng);
+    if (roll < _fantasyRatio)                                                      // the bombshells
+        // Band NARROWED 0.35 -> 0.15 (2026-08-31). Exuberance falls monotonically as natural01 rises, so
+        // drawing uniformly over the wide band put the AVERAGE bombshell mid-band instead of at the
+        // striking end. Measured against the corpus OBW can actually reproduce (i.e. after the per-slider
+        // mesh-safety clamp): mean exuberance 4.65 -> 4.99, and the share landing above the corpus's own
+        // p75 goes 26.3% -> 30.0%. 0.15 is the knee - going on to 0.05 buys only +0.19 more and costs the
+        // variety of having a range at all. This changes HOW a bombshell is built, never HOW MANY there
+        // are: the frequency is still _fantasyRatio, the player's dial. See tools/bodynet/PLAN_v2.md.
+        return std::uniform_real_distribution<float>(0.00f, 0.15f)(rng);
+    return std::uniform_real_distribution<float>(0.55f, 1.00f)(rng);               // the realistic majority
+}
+
+// ── The v3 conditioning axes: the MCM dials the learned path used to bypass ──────────────────────
+// These give "Natural women / Curvy women", "Athletic women" and "Male build" real influence over the
+// AI body. They are CONDITIONING inputs, not transforms applied afterwards: the net learned from the
+// corpus how real preset authors express each axis, so asking for a curvy body returns a body an author
+// would have sculpted - where multiplying a finished body by a factor is exactly the failure mode the
+// net was built to replace.
+//
+// Both reuse the EXISTING per-NPC rolls, so who is curvy/athletic (and how often) is unchanged and stays
+// the player's dial - only how their body gets BUILT changes.
+float WeightManager::GetShape01(RE::Actor* a_actor) {
+    if (!a_actor) return 0.5f;
+    auto* npc = a_actor->GetActorBase();
+    const RE::FormID id = a_actor->GetFormID();
+    std::scoped_lock lock(_mutex);
+    if (npc && !npc->IsFemale()) {
+        // Male: the axis is lean <-> bulky, which is what the "Male build" multiplier meant. Map its
+        // 0.5-1.5 range onto 0-1 and centre the default (1.0) at 0.5 so an untouched dial is neutral.
+        return std::clamp((_maleBuild - 0.5f) / 1.0f, 0.0f, 1.0f);
+    }
+    switch (GetBodyFlavor(id)) {                 // 0.5 = the calibrated middle, matching kDefault
+        case BodyFlavor::kNatural: return 0.12f;
+        case BodyFlavor::kCurvy:   return 0.88f;
+        default:                   return 0.5f;
+    }
+}
+
+float WeightManager::GetTone01(RE::Actor* a_actor) {
+    if (!a_actor) return 0.5f;
+    const RE::FormID id = a_actor->GetFormID();
+    std::scoped_lock lock(_mutex);
+    // Same rng stream and the same two draws ComputeTones uses, so the athletic population is identical
+    // to the procedural one - only the body it produces is learned instead of derived.
+    std::mt19937 ar{ GetActorSeed(id) ^ 0x0A7E1E70u };
+    const bool athletic = std::uniform_real_distribution<float>(0.0f, 1.0f)(ar) < _athleticRatio;
+    const bool snusnu = athletic && (std::uniform_real_distribution<float>(0.0f, 1.0f)(ar) < 0.12f);
+    if (snusnu)   return std::uniform_real_distribution<float>(0.90f, 1.00f)(ar);
+    if (athletic) return std::uniform_real_distribution<float>(0.62f, 0.88f)(ar);
+    return std::uniform_real_distribution<float>(0.00f, 0.30f)(ar);
+}
+
+// Build the whole female slider set from the model. Returns false whenever the caller must fall back to
+// the procedural path (feature off, no model, male, or a beast/excluded actor).
+bool WeightManager::BuildNeuralBody(RE::Actor* a_actor, std::vector<std::pair<std::string, float>>& a_out) {
+    a_out.clear();
+    if (!_neuralBody || !a_actor) return false;
+    auto* npc = a_actor->GetActorBase();
+    if (!npc) return false;
+    const bool female = npc->IsFemale();
+    // BHUNP authors distribute the same silhouette across a materially different slider mix
+    // (notably Butt vs BigButt/AppleCheeks), so use its fine-tuned model when both the mesh and model
+    // are known. Ambiguous/auto-detect failures deliberately fall back to the larger F3BA model.
+    const auto slot = female
+        ? ((GetBaseBody() == 2 && BodyNet::Available(BodyNet::Slot::FemaleBHUNP))
+            ? BodyNet::Slot::FemaleBHUNP : BodyNet::Slot::Female)
+        : BodyNet::Slot::Male;
+    if (!BodyNet::Available(slot)) return false;     // that sex has no model installed -> procedural
+
+    // OBW still owns the archetype roll (with race coherence) and the mock weight; only the slider
+    // VALUES come from the net. Male uses its own 12-archetype table, female the 24.
+    const int   arch = female ? GetArchetypeId(a_actor) : GetMaleArchetypeId(a_actor);
+    const float w01  = std::clamp(GetFrameScore(a_actor) / 100.0f, 0.0f, 1.0f);
+    const float nat  = GetNaturalness(a_actor);
+    const float shp  = GetShape01(a_actor);      // Natural/Curvy  (male: Male build)
+    const float tone = GetTone01(a_actor);       // Athletic women
+    std::uint32_t seed;
+    float breastUnusualRatio;
+    {
+        std::scoped_lock lock(_mutex);
+        seed = GetActorSeed(a_actor->GetFormID());
+        breastUnusualRatio = _breastUnusualRatio;
+    }
+    std::vector<float> vals;
+    BodyNet::Generate(slot, arch, seed, w01, nat, shp, tone, vals);
+    const auto& names = BodyNet::SliderNames(slot);
+    if (vals.size() != names.size() || vals.empty()) return false;
+
+    // The net replaces the complete slider set, so the procedural BreastGravity2/BreastPerkiness
+    // branch never runs. Re-apply only this deliberately rare gameplay trait after inference, using
+    // the exact seeded roll and size gate of the procedural path. Normal neural bodies remain wholly
+    // learned; an unusual body gets one coherent pole (sag OR perk), never both, and stays inside the
+    // same 0-100 mesh rails. This makes the existing MCM dial effective in both generation engines.
+    if (female) BodyNet::ApplyUnusualBreasts(slot, seed, breastUnusualRatio, vals);
+    // UNIT CONVERSION - the whole reason bodies exploded on the first build (2026-08-31). BodyNet works in
+    // BODYSLIDE space (0-100, the scale the training presets are written in); everything handed to SKEE is
+    // in SKEE space (0..~2.4, i.e. value/100 x the master morph scale - see kDef in PapyrusBindings and
+    // GetVolumeMorph). Emitting the raw slider value made every morph 100x too strong. Intensity is NOT
+    // re-applied here: the net already learned the whole body, so the only dial left is the user's master
+    // scale, which keeps working exactly as it does on the procedural path.
+    const float k = GetMorphScale() / 100.0f;
+    a_out.reserve(names.size());
+    for (std::size_t i = 0; i < names.size(); ++i) a_out.emplace_back(names[i], vals[i] * k);
+
+    // SANITY GATE, in SKEE space. sim_bodynet proves the net's own output is inside its 0-100 ceilings, but
+    // it cannot see this boundary - the first build shipped the raw 0-100 values straight to SKEE and every
+    // body blew up 100x. The bound is DERIVED per slider (its own 0-100 ceiling, converted the same way)
+    // rather than a flat constant: a flat 3.0 looked safe but would have refused every body at high Morph
+    // intensity, since Breasts alone reaches 1.55 x 2.5 = 3.88 at the maximum MCM scale. Any breach means
+    // the value SPACE is wrong, not that the body is big - so refuse the whole neural body and fall through
+    // to the untouched procedural path: a wrong-looking NPC is a bug report, a burst mesh is a broken save.
+    const float slack = 1.01f * (std::max)(GetMorphScale(), 0.01f) / 100.0f;
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        const float lim = BodyNet::Ceiling100(names[i]) * slack + 1e-3f;
+        if (!std::isfinite(a_out[i].second) || std::fabs(a_out[i].second) > lim) {
+            SKSE::log::warn("BodyNet: refusing body - '{}' = {:.3f} exceeds its SKEE limit {:.3f} (unit bug?)",
+                            names[i], a_out[i].second, lim);
+            a_out.clear();
+            return false;
+        }
+    }
+    return true;
+}
+
 int WeightManager::GetPhysicsTier(RE::Actor* a_actor) {
     if (!a_actor) return 0;
     std::scoped_lock lock(_mutex);
@@ -1158,19 +1305,19 @@ static std::vector<MaleArchetype> kMaleArchetypes{
 // CBPC bounce % per male archetype (pec/belly jiggle): firm for muscular/lean, soft for fat. Same order.
 // Avg,Lean,Fit,Swim,Soldier,Dadbod,Heavyset,Stocky,Lanky,Twink,Bodybuilder,Powerlifter
 static const float kMaleArchSoftBias[12] = { 28, 14, 12, 14, 20, 60, 80, 50, 16, 22, 16, 45 };
-const MaleArchetype& GetMaleArchetype(std::uint32_t seed) {
-    std::mt19937 rng{ seed ^ 0x0A5C2B71u };
-    float total = 0.0f; for (const auto& a : kMaleArchetypes) total += a.weight * RaceArchMult(a.name, true);
-    float r = std::uniform_real_distribution<float>(0.0f, total)(rng);
-    for (const auto& a : kMaleArchetypes) { const float w = a.weight * RaceArchMult(a.name, true); if (r < w) return a; r -= w; }
-    return kMaleArchetypes.front();
-}
+// Male counterpart of GetArchetypeIndex: same single roller for deltas, physics and BodyNet.
 int GetMaleArchetypeIndex(std::uint32_t seed) {
     std::mt19937 rng{ seed ^ 0x0A5C2B71u };
-    float total = 0.0f; for (const auto& a : kMaleArchetypes) total += a.weight * RaceArchMult(a.name, true);
-    float r = std::uniform_real_distribution<float>(0.0f, total)(rng);
-    for (std::size_t i = 0; i < kMaleArchetypes.size(); ++i) { const float w = kMaleArchetypes[i].weight * RaceArchMult(kMaleArchetypes[i].name, true); if (r < w) return static_cast<int>(i); r -= w; }
-    return 0;
+    std::array<float, 64> w{};
+    const std::size_t n = (std::min)(kMaleArchetypes.size(), w.size());
+    float total = 0.0f;
+    for (std::size_t i = 0; i < n; ++i) { w[i] = kMaleArchetypes[i].weight * RaceArchMult(kMaleArchetypes[i].name, true); total += w[i]; }
+    const float r = std::uniform_real_distribution<float>(0.0f, total)(rng);
+    const int idx = OBW::WeightedPick(std::span<const float>(w.data(), n), r);
+    return idx < 0 ? 0 : idx;
+}
+const MaleArchetype& GetMaleArchetype(std::uint32_t seed) {
+    return kMaleArchetypes[static_cast<std::size_t>(GetMaleArchetypeIndex(seed))];
 }
 float MaleArchetypeDelta(std::uint32_t seed, const std::string& key) {
     const MaleArchetype& a = GetMaleArchetype(seed);
@@ -1433,7 +1580,7 @@ std::string WeightManager::GetMaleArchetypeName(RE::Actor* a_actor) {
     return (idx >= 0 && idx < static_cast<int>(kMaleArchetypes.size())) ? kMaleArchetypes[idx].name : "";
 }
 
-void WeightManager::QueueForMorphs(RE::Actor* a_actor) {
+void WeightManager::QueueForMorphs(RE::Actor* a_actor, bool a_debounce) {
     if (!a_actor) return;
     std::scoped_lock lock(_mutex);
     // THE PLAYER IS NEVER TOUCHED, EVER (2026-07-17, absolute). Every path funnels through this queue
@@ -1443,6 +1590,21 @@ void WeightManager::QueueForMorphs(RE::Actor* a_actor) {
     // its stale ones — see CleanPlayerMorphs).
     if (a_actor == RE::PlayerCharacter::GetSingleton()) return;
     const RE::FormID id = a_actor->GetFormID();
+    // Re-fire suppression: skip an OnActorGenerated/fallback re-enqueue landing within 2.5s of our own apply.
+    // That short window is the equip-churn loop (an outfit change on a managed NPC - e.g. OFW's dossier
+    // neutralize, or any armor swap - rebuilds her biped 3D, OBody re-fires OnActorGenerated, and in mode 1
+    // we'd re-roll her body). Cell crossings and genuine re-processing land far later than 2.5s, so they
+    // still re-queue. (Sibling guard to the Obody_ApplyMorph sink's RecentlyApplied check.)
+    if (RecentlyAppliedLocked(id)) return;
+    // OBody signals as soon as it CALLS ApplyBodyMorphs, while SKEE's MorphFileCache keeps working on
+    // PPL threads. Push the deadline on every signal so bursts coalesce and OBW never starts inside them.
+    if (a_debounce) {
+        const double now = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        _morphReadyAt[id] = now + kMorphSettleMs;
+    } else {
+        _morphReadyAt.erase(id);  // explicit user action: do not inherit an automatic event's deadline
+    }
     // Dedup against the LIVE queue only (NOT _processed): OBody re-fires on every cell crossing and we
     // must re-process then to clear its re-applied preset, so a processed actor CAN be re-queued by the
     // OBody / reprocess / re-roll paths. This guard only stops the same actor sitting in the queue twice
@@ -1462,6 +1624,8 @@ RE::Actor* WeightManager::GetNextMorphActor() {
     const bool hasPlayer = player != nullptr;
     const RE::NiPoint3 pPos = hasPlayer ? player->GetPosition() : RE::NiPoint3{};
     constexpr float kRadiusSq = 8192.0f * 8192.0f;  // ~2 cells
+    const double now = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
 
     std::vector<RE::FormID> alive;
     alive.reserve(_morphQueue.size());
@@ -1471,8 +1635,13 @@ RE::Actor* WeightManager::GetNextMorphActor() {
 
     for (const RE::FormID id : _morphQueue) {
         auto* actor = RE::TESForm::LookupByID<RE::Actor>(id);
-        if (!actor || !actor->Is3DLoaded()) continue;  // drop stale/unloaded
+        if (!actor || !actor->Is3DLoaded()) {
+            _morphReadyAt.erase(id);
+            continue;  // drop stale/unloaded
+        }
         alive.push_back(id);
+        const auto ready = _morphReadyAt.find(id);
+        if (ready != _morphReadyAt.end() && now < ready->second) continue;
         if (!hasPlayer) {
             if (!best) { best = actor; bestId = id; }
         } else {
@@ -1485,6 +1654,7 @@ RE::Actor* WeightManager::GetNextMorphActor() {
     if (!best) return nullptr;  // none within radius → keep them queued, process later
     auto it = std::find(_morphQueue.begin(), _morphQueue.end(), bestId);
     if (it != _morphQueue.end()) _morphQueue.erase(it);
+    _morphReadyAt.erase(bestId);
     // Random mode = an INDEPENDENT random seed per character, assigned ONCE on first processing and persisted
     // (_overrideSeed is serialized) -> stable across save/load within a playthrough, different on each NEW GAME,
     // and NOT reproducible from a single shareable seed. (Seeded keeps id^_seed, which IS shareable.) Also seed the
@@ -1551,7 +1721,7 @@ void WeightManager::RegenerateActor(RE::Actor* a_actor) {
     // would desync the body neck from the baked head → seam. So we only re-roll the
     // MORPHS (neck-safe); the new weight takes effect the next time the actor loads.
     if (a_actor == RE::PlayerCharacter::GetSingleton()) return;   // the player is never OBW-shaped
-    QueueForMorphs(a_actor);
+    QueueForMorphs(a_actor, false);  // explicit hotkey action stays immediate
 }
 
 // Strip OBW's morph keys from the PLAYER — unconditionally. Runs after every save load (cleans bodies an
@@ -1697,6 +1867,10 @@ void WeightManager::Save(SKSE::SerializationInterface* a_intf) {
     if (a_intf->OpenRecord(kRecordDbg, kRecordVer))
         a_intf->WriteRecordData(_debugLog);
 
+    // BodyNet on/off (per save, like every other toggle)
+    if (a_intf->OpenRecord(kRecordNeu, kRecordVer))
+        a_intf->WriteRecordData(_neuralBody);
+
 
     // Per-actor override seeds (hotkey re-rolls) — count followed by id/seed pairs.
     if (a_intf->OpenRecord(kRecordOvr, kRecordVer)) {
@@ -1744,6 +1918,8 @@ void WeightManager::Load(SKSE::SerializationInterface* a_intf) {
             a_intf->ReadRecordData(_curvyRatio);
         } else if (type == kRecordBBd) {
             a_intf->ReadRecordData(_baseBodyPref);
+        } else if (type == kRecordNeu) {
+            a_intf->ReadRecordData(_neuralBody);
         } else if (type == kRecordClo) {
             a_intf->ReadRecordData(_clothedRefit);
         } else if (type == kRecordKey) {
@@ -1798,6 +1974,7 @@ void WeightManager::Revert() {
     _curvyRatio    = Config::g_defaultCurvyRatio;
     _baseBodyPref  = Config::g_defaultBaseBody;
     _clothedRefit  = Config::g_defaultClothedRefit;
+    _neuralBody    = Config::g_defaultNeuralBody;
     _femaleBodies = Config::g_defaultFemaleBodies;
     _maleBodies   = Config::g_defaultMaleBodies;
     _maleBuild    = Config::g_defaultMaleBuild;
@@ -1806,6 +1983,7 @@ void WeightManager::Revert() {
     g_debugLog    = _debugLog;
     _seed         = OBW::CollectEntropy();
     _overrideSeed.clear();
+    _presetName.clear();   // runtime cache (like _processed) - repopulated as NPCs re-process on the new save
     ClearProcessed();
 }
 
